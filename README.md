@@ -1,5 +1,7 @@
 # Tiyn (Тиын) — трекер финансов с контролем дневного лимита трат
 
+[![Android CI](https://github.com/suli-dot/Tiyn/actions/workflows/android-ci.yml/badge.svg)](https://github.com/suli-dot/Tiyn/actions/workflows/android-ci.yml)
+
 > Название — от тиына, наименьшей денежной единицы Казахстана: все суммы в приложении хранятся в тиынах (целочисленно, без float). Экранное имя приложения — «Лимит», внутреннее имя пакета пока `kz.sultan.spendlimit` (ребрендится отдельно при желании).
 
 Нативное Android-приложение (Kotlin). Перехватывает push-уведомления Kaspi
