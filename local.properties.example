@@ -1,0 +1,10 @@
+# Скопируй этот файл в local.properties и подставь свои значения.
+# local.properties в .gitignore — реальные ключи в репозиторий НЕ попадают.
+
+# Путь к Android SDK (Android Studio обычно прописывает сам)
+sdk.dir=C\:\\Users\\User\\AppData\\Local\\Android\\Sdk
+
+# Supabase — Project Settings → API
+SUPABASE_URL=https://your-project-ref.supabase.co
+# Публичный anon-ключ (безопасен для клиента ТОЛЬКО при включённом Row Level Security)
+SUPABASE_ANON_KEY=your-anon-public-key

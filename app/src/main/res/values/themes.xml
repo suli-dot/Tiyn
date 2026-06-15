@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Базовая тема нужна только как контейнер для Activity до старта Compose.
+      Реальное оформление UI задаётся в Compose-теме (ui/theme).
+    -->
+    <style name="Theme.SpendLimit" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

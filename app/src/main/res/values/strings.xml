@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Лимит</string>
+    <string name="notif_listener_label">Перехват уведомлений Kaspi</string>
+
+    <!-- Канал/уведомление о превышении лимита -->
+    <string name="alert_channel_name">Превышение дневного лимита</string>
+    <string name="alert_channel_desc">Предупреждения, когда траты за день вышли за лимит</string>
+
+    <!-- Онбординг -->
+    <string name="onb_notif_title">Доступ к уведомлениям</string>
+    <string name="onb_notif_body">Чтобы автоматически считать траты, приложению нужен доступ к уведомлениям. Оно читает только пуши Kaspi и ничего не отправляет наружу без вашего входа в аккаунт.</string>
+    <string name="onb_battery_title">Работа в фоне</string>
+    <string name="onb_battery_body">Отключите оптимизацию батареи для приложения, иначе система может «убивать» сервис и часть трат не попадёт в учёт.</string>
+</resources>
