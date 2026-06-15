@@ -17,6 +17,7 @@
 ## Быстрый старт
 
 1. Открой проект в Android Studio (Giraffe+), дай Gradle синхронизироваться.
+   Из консоли: `./gradlew assembleDebug` (на Windows — `gradlew.bat assembleDebug`).
 2. Скопируй `local.properties.example` → `local.properties`, впиши `sdk.dir`.
    Ключи Supabase можно оставить пустыми — приложение работает оффлайн.
 3. Запусти на устройстве/эмуляторе (API 26+).
@@ -70,3 +71,7 @@ app/src/main/java/kz/sultan/spendlimit/
 
 Заложено на будущее (этап 2): виджет (Glance), streak, автокатегоризация,
 прогноз «дожития», детектор подписок, конверты, проверка «безопасно ли потратить N».
+
+## Лицензия
+
+[MIT](LICENSE) © 2026 Sultan Tasbulatov
