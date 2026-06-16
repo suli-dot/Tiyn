@@ -103,9 +103,10 @@ abstract class AppDatabase : RoomDatabase() {
                     "spendlimit.db"
                 )
                     .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
-                    // Страховка вниз на этапе разработки: версия без описанной миграции
-                    // пересоздаётся, а не роняет приложение.
-                    .fallbackToDestructiveMigration()
+                    // fallbackToDestructiveMigration НЕ используем: при отсутствии миграции
+                    // лучше явный IllegalStateException на разработке, чем тихое стирание
+                    // данных пользователя в релизе. Любая новая версия схемы обязана
+                    // получить свою Migration в addMigrations выше.
                     .build()
                     .also { INSTANCE = it }
             }
