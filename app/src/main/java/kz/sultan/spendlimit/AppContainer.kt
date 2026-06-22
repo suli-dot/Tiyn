@@ -1,6 +1,7 @@
 package kz.sultan.spendlimit
 
 import android.content.Context
+import kz.sultan.spendlimit.data.backup.BackupRepository
 import kz.sultan.spendlimit.data.local.AppDatabase
 import kz.sultan.spendlimit.data.prefs.SettingsRepository
 import kz.sultan.spendlimit.data.remote.AuthRepository
@@ -22,6 +23,8 @@ class AppContainer(context: Context) {
     val settingsRepository: SettingsRepository = SettingsRepository(context)
 
     val authRepository: AuthRepository = AuthRepository()
+
+    val backupRepository: BackupRepository = BackupRepository(database, settingsRepository)
 
     val financeRepository: FinanceRepository = FinanceRepositoryImpl(
         db = database,

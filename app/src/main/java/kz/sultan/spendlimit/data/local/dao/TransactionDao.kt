@@ -2,6 +2,7 @@ package kz.sultan.spendlimit.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 import kz.sultan.spendlimit.data.local.entity.TransactionEntity
@@ -11,6 +12,14 @@ interface TransactionDao {
 
     @Insert
     suspend fun insert(tx: TransactionEntity): Long
+
+    /** Полный снимок таблицы (включая удалённые) — для экспорта бэкапа. */
+    @Query("SELECT * FROM transactions")
+    suspend fun getAll(): List<TransactionEntity>
+
+    /** Массовая вставка при восстановлении бэкапа; REPLACE — id из файла перетирают совпадающие. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<TransactionEntity>)
 
     /** Запись по id (включая удалённые) — для расчёта корректировки остатка. */
     @Query("SELECT * FROM transactions WHERE id = :id")

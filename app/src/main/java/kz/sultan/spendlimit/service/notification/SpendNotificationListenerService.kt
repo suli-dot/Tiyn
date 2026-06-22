@@ -13,11 +13,11 @@ import kotlinx.coroutines.launch
 import kz.sultan.spendlimit.SpendLimitApp
 import kz.sultan.spendlimit.data.prefs.SettingsRepository
 import kz.sultan.spendlimit.data.repository.FinanceRepository
+import kz.sultan.spendlimit.domain.BudgetPeriod
 import kz.sultan.spendlimit.domain.SpendingLimitCalculator
 import kz.sultan.spendlimit.util.LimitAlertNotifier
 import kz.sultan.spendlimit.work.SyncScheduler
 import java.time.LocalDate
-import java.time.YearMonth
 
 /**
  * Перехватывает уведомления, фильтрует пуши Kaspi, парсит и сохраняет.
@@ -119,25 +119,34 @@ class SpendNotificationListenerService : NotificationListenerService() {
     }
 
     /**
-     * Проверяет месячный лимит категории только что добавленной траты.
-     * Уведомление — один раз на категорию в месяц (дедуп по ключу "slug|yyyy-MM").
+     * Проверяет лимиты категории по всем периодам (день/неделя/месяц) для только что
+     * добавленной траты. Уведомление — один раз на пару категория+период в её отрезке
+     * (дедуп по ключу "slug|PERIOD|bucket").
      */
     private suspend fun checkCategoryLimit(categorySlug: String?) {
         if (categorySlug == null) return
-        val status = repository.categoryBudgetStatus(categorySlug) ?: return // лимита нет
-        if (!status.isExceeded) return
+        val status = repository.categoryBudgetStatus(categorySlug) ?: return // лимитов нет
 
-        val monthSuffix = YearMonth.now().toString() // "2026-06"
-        val key = "$categorySlug|$monthSuffix"
-        if (key in settings.categoryAlerts.first()) return // уже оповещали в этом месяце
+        val exceeded = status.exceededPeriods
+        if (exceeded.isEmpty()) return
 
-        LimitAlertNotifier.notifyCategoryExceeded(
-            applicationContext,
-            categorySlug,
-            status.spentTiyn,
-            status.limitTiyn ?: return
-        )
-        settings.addCategoryAlert(key, monthSuffix)
+        val alreadyAlerted = settings.categoryAlerts.first()
+        val currentBuckets = BudgetPeriod.currentBuckets()
+
+        for (ps in exceeded) {
+            val limit = ps.limitTiyn ?: continue
+            val key = "$categorySlug|${ps.period.name}|${ps.period.bucket()}"
+            if (key in alreadyAlerted) continue // уже оповещали в этом отрезке
+
+            LimitAlertNotifier.notifyCategoryExceeded(
+                applicationContext,
+                categorySlug,
+                ps.period,
+                ps.spentTiyn,
+                limit
+            )
+            settings.addCategoryAlert(key, currentBuckets)
+        }
     }
 
     override fun onDestroy() {

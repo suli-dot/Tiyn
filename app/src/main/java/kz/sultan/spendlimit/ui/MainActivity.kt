@@ -1,9 +1,12 @@
 package kz.sultan.spendlimit.ui
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -52,6 +55,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -70,7 +74,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kz.sultan.spendlimit.data.local.dao.CategorySum
 import kz.sultan.spendlimit.data.prefs.ThemeMode
 import kz.sultan.spendlimit.data.repository.CategoryBudgetStatus
+import kz.sultan.spendlimit.data.repository.CategoryPeriodStatus
 import kz.sultan.spendlimit.data.repository.DayTotal
+import kz.sultan.spendlimit.domain.BudgetPeriod
 import kz.sultan.spendlimit.domain.category.Categories
 import kz.sultan.spendlimit.domain.model.Transaction
 import kz.sultan.spendlimit.domain.model.TransactionType
@@ -146,7 +152,25 @@ private fun MainScreen(
     var showAdd by remember { mutableStateOf(false) }
     var showAuth by remember { mutableStateOf(false) }
     var showBalanceEdit by remember { mutableStateOf(false) }
+    var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
     val authEmail by viewModel.authEmail.collectAsState()
+    val exhausted by viewModel.exhaustedCategories.collectAsState()
+
+    // SAF: пользователь сам выбирает, куда сохранить / откуда взять файл бэкапа.
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) viewModel.exportBackup(uri) { err ->
+            Toast.makeText(
+                context,
+                err ?: "Бэкап сохранён",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) pendingImportUri = uri }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -215,10 +239,21 @@ private fun MainScreen(
                 )
             }
 
+            BackupCard(
+                onExport = {
+                    val stamp = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                    exportLauncher.launch("limit-backup-$stamp.json")
+                },
+                onImport = { importLauncher.launch(arrayOf("application/json", "*/*")) }
+            )
+
             if (!state.configured) {
                 SettingsForm(onSave = viewModel::saveSettings)
             } else {
                 LimitHeader(state, onTapBalance = { showBalanceEdit = true })
+                if (exhausted.isNotEmpty()) {
+                    ExhaustedCategoriesCard(exhausted)
+                }
                 Spacer(Modifier.height(4.dp))
                 Text("Траты за сегодня", style = MaterialTheme.typography.titleMedium)
                 if (state.todayTransactions.isNotEmpty()) {
@@ -261,6 +296,85 @@ private fun MainScreen(
             }
         )
     }
+
+    pendingImportUri?.let { uri ->
+        RestoreConfirmDialog(
+            onConfirm = {
+                pendingImportUri = null
+                viewModel.importBackup(uri) { err ->
+                    Toast.makeText(
+                        context,
+                        err ?: "Данные восстановлены",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            },
+            onDismiss = { pendingImportUri = null }
+        )
+    }
+}
+
+@Composable
+private fun ExhaustedCategoriesCard(items: List<CategoryBudgetStatus>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "Лимиты исчерпаны",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            items.forEach { st ->
+                val c = Categories.bySlug(st.categorySlug)
+                st.exceededPeriods.forEach { ps ->
+                    Text(
+                        "${c.emoji} ${c.title}: ${ps.period.adjective} лимит — " +
+                            "${Money.formatTiyn(ps.spentTiyn)} из ${Money.formatTiyn(ps.limitTiyn ?: 0L)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupCard(onExport: () -> Unit, onImport: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Резервная копия", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "Файл со всеми данными и настройками. Работает без интернета и аккаунта — " +
+                    "храните его где удобно (Google Drive, Telegram, флешка).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onExport, modifier = Modifier.weight(1f)) { Text("Экспорт") }
+                OutlinedButton(onClick = onImport, modifier = Modifier.weight(1f)) { Text("Импорт") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RestoreConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Восстановить из файла?") },
+        text = {
+            Text(
+                "Данные из файла перезапишут совпадающие записи и настройки. Перед этим " +
+                    "автоматически сохранится копия текущего состояния (на случай отката)."
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Восстановить") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
 }
 
 @Composable
@@ -660,7 +774,8 @@ private fun BudgetsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         ) {
             item(key = "hint") {
                 Text(
-                    "Месячные лимиты. Прогресс считается по тратам с начала месяца. Нажмите на категорию, чтобы задать или изменить лимит.",
+                    "Лимиты по периодам: день, неделя, месяц. Прогресс считается по тратам " +
+                        "с начала периода. Нажмите на категорию, чтобы задать или изменить лимиты.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -675,12 +790,12 @@ private fun BudgetsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         BudgetEditDialog(
             status = st,
             onDismiss = { editing = null },
-            onSave = { tiyn ->
-                viewModel.setCategoryBudget(st.categorySlug, tiyn)
-                editing = null
-            },
-            onRemove = {
-                viewModel.removeCategoryBudget(st.categorySlug)
+            onSave = { limits ->
+                BudgetPeriod.entries.forEach { p ->
+                    val tiyn = limits[p]
+                    if (tiyn != null) viewModel.setCategoryBudget(st.categorySlug, p, tiyn)
+                    else viewModel.removeCategoryBudget(st.categorySlug, p)
+                }
                 editing = null
             }
         )
@@ -697,48 +812,52 @@ private fun BudgetRow(st: CategoryBudgetStatus, onClick: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("${c.emoji} ${c.title}", fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                if (st.hasLimit) {
-                    Text(
-                        "${Money.formatTiyn(st.spentTiyn)} / ${Money.formatTiyn(st.limitTiyn!!)}",
-                        fontWeight = FontWeight.Medium,
-                        color = if (st.isExceeded) MaterialTheme.colorScheme.error else Color.Unspecified
-                    )
-                } else {
-                    Text(
-                        "Нет лимита",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            if (st.hasLimit) {
-                ProgressBar(
-                    fraction = st.fraction,
-                    exceeded = st.isExceeded
-                )
+            Text("${c.emoji} ${c.title}", fontWeight = FontWeight.Medium)
+            if (!st.hasAnyLimit) {
                 Text(
-                    text = if (st.isExceeded) "Превышен на ${Money.formatTiyn(-st.remainingTiyn)}"
-                    else "Осталось ${Money.formatTiyn(st.remainingTiyn)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (st.isExceeded) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else if (st.spentTiyn > 0L) {
-                Text(
-                    "Потрачено ${Money.formatTiyn(st.spentTiyn)}",
+                    "Нет лимитов — нажмите, чтобы задать",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            } else {
+                st.periods.filter { it.hasLimit }.forEach { ps -> BudgetPeriodLine(ps) }
             }
         }
+    }
+}
+
+/** Одна строка периода в карточке категории: подпись, прогресс-бар, остаток/превышение. */
+@Composable
+private fun BudgetPeriodLine(ps: CategoryPeriodStatus) {
+    val limit = ps.limitTiyn ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                ps.period.title,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "${Money.formatTiyn(ps.spentTiyn)} / ${Money.formatTiyn(limit)}",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                color = if (ps.isExceeded) MaterialTheme.colorScheme.error else Color.Unspecified
+            )
+        }
+        ProgressBar(fraction = ps.fraction, exceeded = ps.isExceeded)
+        Text(
+            text = if (ps.isExceeded) "Исчерпан, перерасход ${Money.formatTiyn(-ps.remainingTiyn)}"
+            else "Осталось ${Money.formatTiyn(ps.remainingTiyn)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (ps.isExceeded) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -767,40 +886,61 @@ private fun ProgressBar(fraction: Float, exceeded: Boolean) {
 private fun BudgetEditDialog(
     status: CategoryBudgetStatus,
     onDismiss: () -> Unit,
-    onSave: (Long) -> Unit,
-    onRemove: () -> Unit
+    onSave: (Map<BudgetPeriod, Long?>) -> Unit
 ) {
     val c = Categories.bySlug(status.categorySlug)
-    var input by remember { mutableStateOf(status.limitTiyn?.let { tiynToInput(it) } ?: "") }
+    // Поле ввода на каждый период; пусто = лимит снять.
+    val inputs = remember {
+        mutableStateMapOf<BudgetPeriod, String>().apply {
+            BudgetPeriod.entries.forEach { p ->
+                val limit = status.periods.firstOrNull { it.period == p }?.limitTiyn
+                put(p, limit?.let { tiynToInput(it) } ?: "")
+            }
+        }
+    }
     var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Лимит: ${c.emoji} ${c.title}") },
+        title = { Text("Лимиты: ${c.emoji} ${c.title}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it; error = null },
-                    label = { Text("Месячный лимит, ₸") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    "Пустое поле — лимит на период снят.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                BudgetPeriod.entries.forEach { p ->
+                    OutlinedTextField(
+                        value = inputs[p] ?: "",
+                        onValueChange = { inputs[p] = it; error = null },
+                        label = { Text("${p.title}, ₸") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-                if (status.hasLimit) {
-                    TextButton(onClick = onRemove) {
-                        Text("Снять лимит", color = MaterialTheme.colorScheme.error)
-                    }
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                val tiyn = tengeToTiyn(input)
-                if (tiyn == null || tiyn <= 0L) error = "Введите сумму больше нуля"
-                else onSave(tiyn)
+                val result = mutableMapOf<BudgetPeriod, Long?>()
+                for (p in BudgetPeriod.entries) {
+                    val raw = inputs[p]?.trim().orEmpty()
+                    if (raw.isEmpty()) {
+                        result[p] = null
+                    } else {
+                        val tiyn = tengeToTiyn(raw)
+                        if (tiyn == null || tiyn <= 0L) {
+                            error = "${p.title}: введите сумму больше нуля или очистите поле"
+                            return@TextButton
+                        }
+                        result[p] = tiyn
+                    }
+                }
+                onSave(result)
             }) { Text("Сохранить") }
         },
         dismissButton = {

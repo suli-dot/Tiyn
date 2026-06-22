@@ -25,6 +25,7 @@ class CategorizerTest {
             rules.removeAll { it.merchantNorm == rule.merchantNorm }
             rules.add(rule)
         }
+        override suspend fun insertAll(items: List<MerchantRuleEntity>) = items.forEach { upsert(it) }
     }
 
     @Test

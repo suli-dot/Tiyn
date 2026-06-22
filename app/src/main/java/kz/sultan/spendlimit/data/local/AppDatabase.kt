@@ -26,7 +26,8 @@ import kz.sultan.spendlimit.data.local.entity.TransactionEntity
     // v3: + таблица merchant_rules (автокатегоризация), + transactions.currency (мультивалютность)
     // v4: + transactions.deleted_at (soft delete)
     // v5: + таблица category_budgets (месячные лимиты по категориям)
-    version = 5,
+    // v6: category_budgets — лимиты по периодам (day/week/month) вместо одного limit_tiyn
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -95,6 +96,34 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Миграция 5→6. Переводит category_budgets с одного месячного лимита на три
+         * по периодам (день/неделя/месяц). SQLite не умеет менять колонку — пересоздаём
+         * таблицу, перенося старый limit_tiyn в limit_month_tiyn (прежние лимиты не теряются).
+         *
+         * DDL обязан совпадать с тем, что Room генерит из @Entity (см. app/schemas/6.json).
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `category_budgets_new` (" +
+                        "`category` TEXT NOT NULL, " +
+                        "`limit_day_tiyn` INTEGER, " +
+                        "`limit_week_tiyn` INTEGER, " +
+                        "`limit_month_tiyn` INTEGER, " +
+                        "`updated_at` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`category`))"
+                )
+                db.execSQL(
+                    "INSERT INTO `category_budgets_new` " +
+                        "(`category`, `limit_month_tiyn`, `updated_at`) " +
+                        "SELECT `category`, `limit_tiyn`, `updated_at` FROM `category_budgets`"
+                )
+                db.execSQL("DROP TABLE `category_budgets`")
+                db.execSQL("ALTER TABLE `category_budgets_new` RENAME TO `category_budgets`")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -102,7 +131,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "spendlimit.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     // fallbackToDestructiveMigration НЕ используем: при отсутствии миграции
                     // лучше явный IllegalStateException на разработке, чем тихое стирание
                     // данных пользователя в релизе. Любая новая версия схемы обязана

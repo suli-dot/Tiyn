@@ -1,22 +1,29 @@
 package kz.sultan.spendlimit.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kz.sultan.spendlimit.SpendLimitApp
 import kz.sultan.spendlimit.data.local.dao.CategorySum
 import kz.sultan.spendlimit.data.prefs.ThemeMode
 import kz.sultan.spendlimit.data.prefs.UserSettings
 import kz.sultan.spendlimit.data.repository.CategoryBudgetStatus
+import kz.sultan.spendlimit.data.repository.CategoryLimits
+import kz.sultan.spendlimit.data.repository.CategoryPeriodStatus
 import kz.sultan.spendlimit.data.repository.DayTotal
+import kz.sultan.spendlimit.domain.BudgetPeriod
 import kz.sultan.spendlimit.domain.SpendingLimitCalculator
 import kz.sultan.spendlimit.domain.category.Categories
 import kz.sultan.spendlimit.domain.model.Transaction
@@ -58,6 +65,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val finance = container.financeRepository
     private val settingsRepo = container.settingsRepository
     private val auth = container.authRepository
+    private val backup = container.backupRepository
 
     val uiState: StateFlow<MainUiState> = combine(
         settingsRepo.settings,
@@ -148,19 +156,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Месячные лимиты по категориям ----
 
-    /** Статус бюджета по всем «расходным» категориям (кроме «Без категории»). */
+    /**
+     * Статус бюджета по всем «расходным» категориям (кроме «Без категории»):
+     * траты и лимит по каждому периоду (день/неделя/месяц).
+     */
     val categoryBudgets: StateFlow<List<CategoryBudgetStatus>> = combine(
-        finance.observeMonthlySpentByCategory(),
-        finance.observeCategoryLimits()
-    ) { spent, limits ->
+        finance.observeCategoryLimits(),
+        finance.observeSpentByCategory(BudgetPeriod.DAY),
+        finance.observeSpentByCategory(BudgetPeriod.WEEK),
+        finance.observeSpentByCategory(BudgetPeriod.MONTH)
+    ) { limits, spentDay, spentWeek, spentMonth ->
+        val spentByPeriod = mapOf(
+            BudgetPeriod.DAY to spentDay,
+            BudgetPeriod.WEEK to spentWeek,
+            BudgetPeriod.MONTH to spentMonth
+        )
         Categories.ALL
             .filter { it.slug != Categories.UNCATEGORIZED.slug }
             .map { c ->
-                CategoryBudgetStatus(
-                    categorySlug = c.slug,
-                    spentTiyn = spent[c.slug] ?: 0L,
-                    limitTiyn = limits[c.slug]
-                )
+                val lim = limits[c.slug] ?: CategoryLimits()
+                val periods = BudgetPeriod.entries.map { p ->
+                    CategoryPeriodStatus(
+                        period = p,
+                        spentTiyn = spentByPeriod.getValue(p)[c.slug] ?: 0L,
+                        limitTiyn = lim.forPeriod(p)
+                    )
+                }
+                CategoryBudgetStatus(c.slug, periods)
             }
     }.stateIn(
         scope = viewModelScope,
@@ -168,12 +190,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         initialValue = emptyList()
     )
 
-    fun setCategoryBudget(categorySlug: String, limitTiyn: Long) {
-        viewModelScope.launch { finance.setCategoryBudget(categorySlug, limitTiyn) }
+    /** Категории с исчерпанным лимитом хотя бы по одному периоду — для карточки на главном. */
+    val exhaustedCategories: StateFlow<List<CategoryBudgetStatus>> = categoryBudgets
+        .map { list -> list.filter { it.exceededPeriods.isNotEmpty() } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    fun setCategoryBudget(categorySlug: String, period: BudgetPeriod, limitTiyn: Long) {
+        viewModelScope.launch { finance.setCategoryBudget(categorySlug, period, limitTiyn) }
     }
 
-    fun removeCategoryBudget(categorySlug: String) {
-        viewModelScope.launch { finance.removeCategoryBudget(categorySlug) }
+    fun removeCategoryBudget(categorySlug: String, period: BudgetPeriod) {
+        viewModelScope.launch { finance.removeCategoryBudget(categorySlug, period) }
     }
 
     // ---- Тема оформления ----
@@ -251,6 +282,58 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { auth.signOut() }
     }
 
+    // ---- Резервная копия: локальный файл (Канал A) ----
+
+    /**
+     * Экспортирует все данные в выбранный пользователем файл (SAF Uri).
+     * onResult(null) — успех, иначе текст ошибки.
+     */
+    fun exportBackup(uri: Uri, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val msg = try {
+                val json = backup.export()
+                withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver
+                        .openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                        ?: error("Не удалось открыть файл для записи")
+                }
+                null
+            } catch (e: Exception) {
+                e.message ?: "Не удалось сохранить бэкап"
+            }
+            onResult(msg)
+        }
+    }
+
+    /**
+     * Восстанавливает данные из выбранного файла (SAF Uri). ПЕРЕД импортом делает
+     * авто-бэкап текущего состояния во внутреннюю папку (откат при ошибке/недовольстве).
+     * onResult(null) — успех, иначе текст ошибки.
+     */
+    fun importBackup(uri: Uri, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val msg = try {
+                // Страховка: снимок текущего состояния до перезаписи.
+                val safety = backup.export()
+                withContext(Dispatchers.IO) {
+                    getApplication<Application>()
+                        .filesDir.resolve(PRE_RESTORE_FILE)
+                        .writeText(safety, Charsets.UTF_8)
+                }
+                val json = withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver
+                        .openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                        ?: error("Не удалось открыть файл для чтения")
+                }
+                backup.import(json)
+                null
+            } catch (e: Exception) {
+                e.message ?: "Не удалось восстановить из файла (повреждён или не тот формат)"
+            }
+            onResult(msg)
+        }
+    }
+
     /** Добавляет операцию вручную; лимит и сводки пересчитаются через существующие Flow. */
     fun addManualTransaction(
         amountTiyn: Long,
@@ -282,5 +365,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             finance.updateTransaction(id, amountTiyn, type, merchant, category)
         }
+    }
+
+    private companion object {
+        /** Авто-бэкап во внутренней папке, снимаемый перед восстановлением из файла. */
+        const val PRE_RESTORE_FILE = "pre-restore-backup.json"
     }
 }

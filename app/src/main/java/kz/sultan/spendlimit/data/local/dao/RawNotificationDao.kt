@@ -2,6 +2,7 @@ package kz.sultan.spendlimit.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kz.sultan.spendlimit.data.local.entity.RawNotificationEntity
 
@@ -10,6 +11,14 @@ interface RawNotificationDao {
 
     @Insert
     suspend fun insert(raw: RawNotificationEntity): Long
+
+    /** Полный снимок таблицы — для экспорта бэкапа. */
+    @Query("SELECT * FROM raw_notifications")
+    suspend fun getAll(): List<RawNotificationEntity>
+
+    /** Массовая вставка при восстановлении бэкапа (вставлять ДО transactions из-за FK raw_id). */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<RawNotificationEntity>)
 
     @Query("SELECT * FROM raw_notifications WHERE synced = 0 ORDER BY posted_at ASC LIMIT :limit")
     suspend fun unsynced(limit: Int = 200): List<RawNotificationEntity>

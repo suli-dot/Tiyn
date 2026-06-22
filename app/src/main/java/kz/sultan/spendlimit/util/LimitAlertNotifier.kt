@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
 import kz.sultan.spendlimit.R
+import kz.sultan.spendlimit.domain.BudgetPeriod
 import kz.sultan.spendlimit.domain.category.Categories
 
 /**
@@ -62,19 +63,26 @@ object LimitAlertNotifier {
     }
 
     /**
-     * Превышен месячный лимит конкретной категории.
-     * @param categorySlug категория, по которой превышен лимит.
-     * @param spentTiyn потрачено за месяц; @param limitTiyn заданный лимит.
+     * Исчерпан лимит категории на конкретный период (день/неделя/месяц).
+     * @param categorySlug категория; @param period период лимита.
+     * @param spentTiyn потрачено за период; @param limitTiyn заданный лимит.
      */
-    fun notifyCategoryExceeded(context: Context, categorySlug: String, spentTiyn: Long, limitTiyn: Long) {
+    fun notifyCategoryExceeded(
+        context: Context,
+        categorySlug: String,
+        period: BudgetPeriod,
+        spentTiyn: Long,
+        limitTiyn: Long
+    ) {
         val c = Categories.bySlug(categorySlug)
-        // Свой ID на категорию — чтобы не затирать дневное уведомление и уведомления других категорий.
+        // Свой ID на пару категория×период — чтобы уведомления не затирали друг друга.
         val idx = Categories.ALL.indexOfFirst { it.slug == categorySlug }.coerceAtLeast(0)
+        val id = CATEGORY_NOTIFICATION_ID_BASE + idx * BudgetPeriod.entries.size + period.ordinal
         post(
             context,
-            title = "Лимит категории превышен",
-            text = "${c.emoji} ${c.title}: потрачено ${Money.formatTiyn(spentTiyn)} из ${Money.formatTiyn(limitTiyn)}",
-            notificationId = CATEGORY_NOTIFICATION_ID_BASE + idx
+            title = "Исчерпан ${period.adjective} лимит",
+            text = "${c.emoji} ${c.title}: потрачено ${Money.formatTiyn(spentTiyn)} из ${Money.formatTiyn(limitTiyn)} за ${period.title.lowercase()}",
+            notificationId = id
         )
     }
 

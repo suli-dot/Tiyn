@@ -13,6 +13,7 @@ import kz.sultan.spendlimit.data.local.entity.RawNotificationEntity
 import kz.sultan.spendlimit.data.local.entity.TransactionEntity
 import kz.sultan.spendlimit.data.prefs.SettingsRepository
 import kz.sultan.spendlimit.domain.BalanceEffect
+import kz.sultan.spendlimit.domain.BudgetPeriod
 import kz.sultan.spendlimit.domain.category.Categories
 import kz.sultan.spendlimit.domain.category.Categorizer
 import kz.sultan.spendlimit.domain.model.ParsedTransaction
@@ -173,39 +174,57 @@ class FinanceRepositoryImpl(
                 .sortedBy { it.date }
         }
 
-    override fun observeMonthlySpentByCategory(): Flow<Map<String, Long>> =
-        txDao.observeCategorySums(Time.startOfMonthMillis(), Time.startOfNextMonthMillis())
-            .map { list ->
-                list.associate { (it.category ?: Categories.UNCATEGORIZED.slug) to it.total }
-            }
-
-    override fun observeCategoryLimits(): Flow<Map<String, Long>> =
-        budgetDao.observeAll().map { list -> list.associate { it.category to it.limitTiyn } }
-
-    override suspend fun setCategoryBudget(categorySlug: String, limitTiyn: Long) {
-        budgetDao.upsert(
-            CategoryBudgetEntity(
-                category = categorySlug,
-                limitTiyn = limitTiyn,
-                updatedAt = System.currentTimeMillis()
-            )
-        )
+    override fun observeSpentByCategory(period: BudgetPeriod): Flow<Map<String, Long>> {
+        val (from, to) = period.range()
+        return txDao.observeCategorySums(from, to).map { list ->
+            list.associate { (it.category ?: Categories.UNCATEGORIZED.slug) to it.total }
+        }
     }
 
-    override suspend fun removeCategoryBudget(categorySlug: String) {
-        budgetDao.delete(categorySlug)
+    override fun observeCategoryLimits(): Flow<Map<String, CategoryLimits>> =
+        budgetDao.observeAll().map { list -> list.associate { it.category to it.toLimits() } }
+
+    override suspend fun setCategoryBudget(categorySlug: String, period: BudgetPeriod, limitTiyn: Long) {
+        val current = budgetDao.find(categorySlug)?.toLimits() ?: CategoryLimits()
+        budgetDao.upsert(current.withPeriod(period, limitTiyn).toEntity(categorySlug))
+    }
+
+    override suspend fun removeCategoryBudget(categorySlug: String, period: BudgetPeriod) {
+        val current = budgetDao.find(categorySlug)?.toLimits() ?: return
+        val updated = current.withPeriod(period, null)
+        // Лимитов не осталось — убираем строку целиком.
+        if (updated.isEmpty) budgetDao.delete(categorySlug)
+        else budgetDao.upsert(updated.toEntity(categorySlug))
     }
 
     override suspend fun categoryBudgetStatus(categorySlug: String): CategoryBudgetStatus? {
-        val limit = budgetDao.find(categorySlug)?.limitTiyn ?: return null
-        val spent = txDao.sumForCategory(
-            categorySlug,
-            Time.startOfMonthMillis(),
-            Time.startOfNextMonthMillis()
-        )
-        return CategoryBudgetStatus(categorySlug, spent, limit)
+        val limits = budgetDao.find(categorySlug)?.toLimits() ?: return null
+        if (limits.isEmpty) return null
+        val periods = BudgetPeriod.entries.map { p ->
+            val limit = limits.forPeriod(p)
+            val spent = if (limit == null) 0L else {
+                val (from, to) = p.range()
+                txDao.sumForCategory(categorySlug, from, to)
+            }
+            CategoryPeriodStatus(p, spent, limit)
+        }
+        return CategoryBudgetStatus(categorySlug, periods)
     }
 }
+
+private fun CategoryBudgetEntity.toLimits() = CategoryLimits(
+    day = limitDayTiyn,
+    week = limitWeekTiyn,
+    month = limitMonthTiyn
+)
+
+private fun CategoryLimits.toEntity(categorySlug: String) = CategoryBudgetEntity(
+    category = categorySlug,
+    limitDayTiyn = day,
+    limitWeekTiyn = week,
+    limitMonthTiyn = month,
+    updatedAt = System.currentTimeMillis()
+)
 
 private fun TransactionEntity.toDomain() = Transaction(
     id = id,

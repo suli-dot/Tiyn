@@ -14,6 +14,10 @@ interface CategoryBudgetDao {
     @Query("SELECT * FROM category_budgets")
     fun observeAll(): Flow<List<CategoryBudgetEntity>>
 
+    /** Снимок всех лимитов одним вызовом — для экспорта бэкапа. */
+    @Query("SELECT * FROM category_budgets")
+    suspend fun getAll(): List<CategoryBudgetEntity>
+
     /** Лимит конкретной категории (null = не задан). */
     @Query("SELECT * FROM category_budgets WHERE category = :category LIMIT 1")
     suspend fun find(category: String): CategoryBudgetEntity?
@@ -21,6 +25,10 @@ interface CategoryBudgetDao {
     /** Установка/изменение лимита (конфликт по PK category → REPLACE). */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(budget: CategoryBudgetEntity)
+
+    /** Массовая вставка при восстановлении бэкапа (конфликт по PK category → REPLACE). */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<CategoryBudgetEntity>)
 
     /** Снятие лимита с категории. */
     @Query("DELETE FROM category_budgets WHERE category = :category")

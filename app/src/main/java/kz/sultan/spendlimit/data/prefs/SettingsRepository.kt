@@ -10,7 +10,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kz.sultan.spendlimit.data.backup.SettingsDto
 import java.time.LocalDate
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -33,21 +35,22 @@ class SettingsRepository(private val context: Context) {
 
     /**
      * Множество уже показанных уведомлений о превышении лимита категории.
-     * Ключ — "slug|yyyy-MM", поэтому каждая категория алертится не чаще раза в месяц.
+     * Ключ — "slug|PERIOD|bucket" (bucket: день yyyy-MM-dd, неделя — дата понедельника,
+     * месяц yyyy-MM), поэтому каждая пара категория+период алертится раз на свой отрезок.
      */
     val categoryAlerts: Flow<Set<String>> = context.dataStore.data.map { p ->
         p[Keys.CATEGORY_ALERTS] ?: emptySet()
     }
 
     /**
-     * Помечает категорию как уже оповещённую в этом месяце. Заодно вычищает ключи
-     * прошлых месяцев (оставляем только текущий [currentMonthSuffix], напр. "2026-06"),
-     * чтобы множество не росло бесконечно.
+     * Помечает пару категория+период как оповещённую в текущем отрезке. Заодно вычищает
+     * протухшие ключи: оставляем только те, чей bucket входит в [currentBuckets]
+     * (текущий день/неделя/месяц), чтобы множество не росло бесконечно.
      */
-    suspend fun addCategoryAlert(key: String, currentMonthSuffix: String) {
+    suspend fun addCategoryAlert(key: String, currentBuckets: Set<String>) {
         context.dataStore.edit { p ->
             val kept = (p[Keys.CATEGORY_ALERTS] ?: emptySet())
-                .filterTo(mutableSetOf()) { it.endsWith("|$currentMonthSuffix") }
+                .filterTo(mutableSetOf()) { existing -> currentBuckets.any { existing.endsWith("|$it") } }
             kept.add(key)
             p[Keys.CATEGORY_ALERTS] = kept
         }
@@ -113,6 +116,36 @@ class SettingsRepository(private val context: Context) {
      */
     suspend fun setBalance(balanceTiyn: Long) {
         context.dataStore.edit { p -> p[Keys.BALANCE] = balanceTiyn }
+    }
+
+    /**
+     * Снимок настроек для бэкапа. Алерт-дедуп (ALERT_DAY/LEVEL, CATEGORY_ALERTS) НЕ включаем —
+     * это транзиентное состояние устройства, не пользовательские данные.
+     */
+    suspend fun exportSettings(): SettingsDto {
+        val p = context.dataStore.data.first()
+        return SettingsDto(
+            balanceTiyn = p[Keys.BALANCE] ?: 0L,
+            obligatoryTiyn = p[Keys.OBLIGATORY] ?: 0L,
+            nextIncomeEpochDay = p[Keys.NEXT_INCOME],
+            themeMode = p[Keys.THEME] ?: ThemeMode.SYSTEM.name
+        )
+    }
+
+    /** Восстановление настроек из бэкапа. Перезаписывает баланс/обязательные/дату дохода/тему. */
+    suspend fun importSettings(dto: SettingsDto) {
+        context.dataStore.edit { p ->
+            p[Keys.BALANCE] = dto.balanceTiyn
+            p[Keys.OBLIGATORY] = dto.obligatoryTiyn
+            if (dto.nextIncomeEpochDay != null) {
+                p[Keys.NEXT_INCOME] = dto.nextIncomeEpochDay
+            } else {
+                p.remove(Keys.NEXT_INCOME)
+            }
+            // Валидируем имя темы — мусор из чужого файла не должен ломать чтение.
+            val theme = runCatching { ThemeMode.valueOf(dto.themeMode) }.getOrNull() ?: ThemeMode.SYSTEM
+            p[Keys.THEME] = theme.name
+        }
     }
 }
 

@@ -28,4 +28,8 @@ interface MerchantRuleDao {
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(rule: MerchantRuleEntity)
+
+    /** Массовая вставка при восстановлении бэкапа. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<MerchantRuleEntity>)
 }
