@@ -9,6 +9,15 @@
     <!-- Синхронизация через сеть -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Голосовой ввод трат: запись с микрофона для распознавания речи -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Android 11+: без этого SpeechRecognizer не «видит» сервис распознавания на устройстве -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 
     <application
         android:name=".SpendLimitApp"

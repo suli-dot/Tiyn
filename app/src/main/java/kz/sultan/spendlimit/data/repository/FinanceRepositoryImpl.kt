@@ -146,6 +146,12 @@ class FinanceRepositoryImpl(
         }
     }
 
+    override suspend fun spentBetween(fromMillis: Long, toMillis: Long, categorySlug: String?): Long =
+        if (categorySlug == null) txDao.sumOutgoing(fromMillis, toMillis)
+        else txDao.sumForCategory(categorySlug, fromMillis, toMillis)
+
+    override suspend fun lastTransaction(): Transaction? = txDao.findLast()?.toDomain()
+
     override fun observeTodayOutgoingSum(): Flow<Long> =
         txDao.observeOutgoingSum(Time.startOfTodayMillis(), Time.startOfTomorrowMillis())
 

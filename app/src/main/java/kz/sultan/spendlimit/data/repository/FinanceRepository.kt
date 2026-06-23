@@ -97,6 +97,15 @@ interface FinanceRepository {
     suspend fun deleteTransaction(id: Long)
 
     /**
+     * Одноразовая сумма исходящих трат за период [fromMillis, toMillis).
+     * [categorySlug] = null → по всем категориям. Для голосовых запросов «сколько потрачено».
+     */
+    suspend fun spentBetween(fromMillis: Long, toMillis: Long, categorySlug: String?): Long
+
+    /** Последняя операция (самая свежая) — для голосовой правки «отмени/поправь последнее». null, если записей нет. */
+    suspend fun lastTransaction(): Transaction?
+
+    /**
      * Правит ошибочно распознанную транзакцию (сумма/тип/мерчант).
      * Помечает запись отредактированной и снимает флаг synced для повторной выгрузки.
      * Сырое уведомление не трогается — остаётся оригиналом для сверки с парсером.

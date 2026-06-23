@@ -62,6 +62,18 @@ interface TransactionDao {
     )
     suspend fun sumForCategory(category: String, fromMillis: Long, toMillis: Long): Long
 
+    /** Одноразовая сумма исходящих трат за период (все категории) — для голосовых запросов «сколько потрачено». */
+    @Query(
+        "SELECT COALESCE(SUM(amount), 0) FROM transactions " +
+            "WHERE deleted_at IS NULL AND type IN ('PURCHASE', 'TRANSFER') " +
+            "AND created_at >= :fromMillis AND created_at < :toMillis"
+    )
+    suspend fun sumOutgoing(fromMillis: Long, toMillis: Long): Long
+
+    /** Последняя не удалённая запись (самая свежая по created_at) — для голосовой правки «отмени/поправь последнее». */
+    @Query("SELECT * FROM transactions WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1")
+    suspend fun findLast(): TransactionEntity?
+
     @Query("SELECT * FROM transactions WHERE synced = 0 ORDER BY created_at ASC LIMIT :limit")
     suspend fun unsynced(limit: Int = 200): List<TransactionEntity>
 

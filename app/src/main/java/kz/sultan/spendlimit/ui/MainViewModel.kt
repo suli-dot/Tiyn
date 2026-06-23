@@ -28,6 +28,8 @@ import kz.sultan.spendlimit.domain.SpendingLimitCalculator
 import kz.sultan.spendlimit.domain.category.Categories
 import kz.sultan.spendlimit.domain.model.Transaction
 import kz.sultan.spendlimit.domain.model.TransactionType
+import kz.sultan.spendlimit.domain.voice.IntentResult
+import kz.sultan.spendlimit.domain.voice.VoiceOutcome
 import kz.sultan.spendlimit.util.Time
 import kz.sultan.spendlimit.work.SyncScheduler
 import java.time.Instant
@@ -59,6 +61,16 @@ data class StatsUiState(
     val totalTiyn: Long = 0L
 )
 
+/**
+ * Состояние голосового слоя для UI. [busy] — идёт запрос к модели (NLU); [message] —
+ * одноразовое сообщение результата (подтверждение/переспрос/ошибка), которое UI показывает
+ * и сбрасывает через [MainViewModel.clearVoiceMessage].
+ */
+data class VoiceState(
+    val busy: Boolean = false,
+    val message: String? = null
+)
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val container = (app as SpendLimitApp).container
@@ -66,6 +78,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val settingsRepo = container.settingsRepository
     private val auth = container.authRepository
     private val backup = container.backupRepository
+    private val intentResolver = container.intentResolver
+    private val voiceHandler = container.voiceCommandHandler
 
     val uiState: StateFlow<MainUiState> = combine(
         settingsRepo.settings,
@@ -345,6 +359,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             finance.addManualTransaction(amountTiyn, type, merchant, category, createdAt)
         }
+    }
+
+    // ---- Голосовой ввод ----
+
+    private val _voice = MutableStateFlow(VoiceState())
+    val voice: StateFlow<VoiceState> = _voice
+
+    /**
+     * Принимает распознанный текст команды: модель (Claude) → [IntentResult] → исполнение
+     * через [voiceHandler]. Любой исход превращается в одно сообщение для UI. Записи и лимиты
+     * после этого обновятся сами — через те же Flow, что и ручной ввод.
+     */
+    fun onVoiceText(text: String) {
+        _voice.value = VoiceState(busy = true, message = null)
+        viewModelScope.launch {
+            val outcome = when (val result = intentResolver.resolve(text)) {
+                is IntentResult.Failure -> VoiceOutcome.Failed(result.reason)
+                is IntentResult.Resolved -> voiceHandler.handle(result.intent)
+            }
+            _voice.value = VoiceState(busy = false, message = outcome.toMessage())
+        }
+    }
+
+    /** Сбрасывает показанное сообщение, чтобы оно не всплыло повторно при рекомпозиции. */
+    fun clearVoiceMessage() {
+        _voice.value = _voice.value.copy(message = null)
+    }
+
+    private fun VoiceOutcome.toMessage(): String = when (this) {
+        is VoiceOutcome.Recorded -> message
+        is VoiceOutcome.Answer -> message
+        is VoiceOutcome.NeedClarify -> question
+        is VoiceOutcome.Failed -> message
     }
 
     /** Удаляет ошибочно распознанную транзакцию; лимит пересчитается автоматически. */

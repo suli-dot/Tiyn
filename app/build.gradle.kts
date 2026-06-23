@@ -32,6 +32,11 @@ android {
         // Доступны в коде как BuildConfig.SUPABASE_URL / BuildConfig.SUPABASE_ANON_KEY
         buildConfigField("String", "SUPABASE_URL", "\"${secret("SUPABASE_URL")}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${secret("SUPABASE_ANON_KEY")}\"")
+
+        // Ключ Anthropic для голосового NLU. Лежит в local.properties (в .gitignore),
+        // в исходник/репозиторий не попадает. Модель — Haiku по умолчанию (дёшево, быстро).
+        buildConfigField("String", "ANTHROPIC_API_KEY", "\"${secret("ANTHROPIC_API_KEY")}\"")
+        buildConfigField("String", "ANTHROPIC_MODEL", "\"${secret("ANTHROPIC_MODEL", "claude-haiku-4-5")}\"")
     }
 
     buildTypes {

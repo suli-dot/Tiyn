@@ -1,5 +1,7 @@
 package kz.sultan.spendlimit.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -53,6 +55,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -68,6 +71,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -82,6 +86,9 @@ import kz.sultan.spendlimit.domain.model.Transaction
 import kz.sultan.spendlimit.domain.model.TransactionType
 import kz.sultan.spendlimit.ui.theme.SpendLimitTheme
 import kz.sultan.spendlimit.ui.theme.positiveColor
+import kz.sultan.spendlimit.ui.voice.MicState
+import kz.sultan.spendlimit.ui.voice.rememberSpeechController
+import kz.sultan.spendlimit.ui.voice.rememberSpeechSpeaker
 import kz.sultan.spendlimit.util.Money
 import kz.sultan.spendlimit.util.SystemPermissions
 import java.time.Instant
@@ -156,6 +163,35 @@ private fun MainScreen(
     val authEmail by viewModel.authEmail.collectAsState()
     val exhausted by viewModel.exhaustedCategories.collectAsState()
 
+    // Голосовой ввод: STT (микрофон) локально на экране, NLU+запись — во ViewModel.
+    val voice by viewModel.voice.collectAsState()
+    var micState by remember { mutableStateOf(MicState.IDLE) }
+    val speech = rememberSpeechController(
+        onText = { viewModel.onVoiceText(it) },
+        onError = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() },
+        onStateChange = { micState = it }
+    )
+    val micPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) speech.start()
+        else Toast.makeText(context, "Нужен доступ к микрофону для голосового ввода", Toast.LENGTH_SHORT).show()
+    }
+    val onMicTap = {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) speech.start() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+    // Результат голосовой команды показываем текстом и озвучиваем (полный дуплекс), затем сбрасываем.
+    val speaker = rememberSpeechSpeaker()
+    LaunchedEffect(voice.message) {
+        voice.message?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            speaker.speak(it)
+            viewModel.clearVoiceMessage()
+        }
+    }
+
     // SAF: пользователь сам выбирает, куда сохранить / откуда взять файл бэкапа.
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -205,7 +241,17 @@ private fun MainScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAdd = true }) { Text("+", fontSize = 28.sp) }
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                VoiceFab(
+                    listening = micState == MicState.LISTENING,
+                    busy = voice.busy,
+                    onClick = onMicTap
+                )
+                FloatingActionButton(onClick = { showAdd = true }) { Text("+", fontSize = 28.sp) }
+            }
         }
     ) { padding ->
         Column(
@@ -311,6 +357,25 @@ private fun MainScreen(
             },
             onDismiss = { pendingImportUri = null }
         )
+    }
+}
+
+/**
+ * Кнопка голосового ввода. Меняет вид по фазе: ожидание → микрофон, слушает → красная,
+ * идёт распознавание смысла (запрос к модели) → песочные часы и клик заблокирован.
+ */
+@Composable
+private fun VoiceFab(listening: Boolean, busy: Boolean, onClick: () -> Unit) {
+    val container = when {
+        listening -> MaterialTheme.colorScheme.errorContainer
+        busy -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.primaryContainer
+    }
+    FloatingActionButton(
+        onClick = { if (!busy) onClick() },
+        containerColor = container
+    ) {
+        Text(if (busy) "⏳" else "🎤", fontSize = 22.sp)
     }
 }
 
