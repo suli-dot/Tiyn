@@ -27,7 +27,8 @@ import kz.sultan.spendlimit.data.local.entity.TransactionEntity
     // v4: + transactions.deleted_at (soft delete)
     // v5: + таблица category_budgets (месячные лимиты по категориям)
     // v6: category_budgets — лимиты по периодам (day/week/month) вместо одного limit_tiyn
-    version = 6,
+    // v7: + raw_notifications.dedup_key (+индекс) — дедуп повторной доставки одного пуша
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -124,6 +125,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Миграция 6→7. Добавляет колонку дедупа повторной доставки пушей и индекс по ней.
+         * Существующие данные сохраняются (dedup_key у старых записей = NULL).
+         *
+         * DDL обязан совпадать с тем, что Room генерит из @Entity (см. app/schemas/7.json):
+         * имя индекса по умолчанию — `index_raw_notifications_dedup_key`.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `raw_notifications` ADD COLUMN `dedup_key` TEXT")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_raw_notifications_dedup_key` " +
+                        "ON `raw_notifications` (`dedup_key`)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -131,7 +149,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "spendlimit.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(
+                        MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
+                    )
                     // fallbackToDestructiveMigration НЕ используем: при отсутствии миграции
                     // лучше явный IllegalStateException на разработке, чем тихое стирание
                     // данных пользователя в релизе. Любая новая версия схемы обязана

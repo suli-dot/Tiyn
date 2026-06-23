@@ -13,7 +13,7 @@ import androidx.room.PrimaryKey
  */
 @Entity(
     tableName = "raw_notifications",
-    indices = [Index("posted_at"), Index("synced")]
+    indices = [Index("posted_at"), Index("synced"), Index("dedup_key")]
 )
 data class RawNotificationEntity(
     @PrimaryKey(autoGenerate = true)
@@ -33,5 +33,15 @@ data class RawNotificationEntity(
 
     /** false — ещё не выгружено в Supabase. WorkManager чистит очередь после успешной выгрузки. */
     @ColumnInfo(name = "synced")
-    val synced: Boolean = false
+    val synced: Boolean = false,
+
+    /**
+     * Сигнатура повторной доставки одного и того же пуша: `"${sbn.key}|${postTime}"`.
+     * Система может вызвать onNotificationPosted несколько раз для одного уведомления
+     * (двойной callback, реконнект листенера, перепост после ребута) — все они несут
+     * одинаковые key+postTime. По этому полю отсекаем дубли (см. ingestNotification).
+     * null — операция не из пуша (ручная/голос) или восстановленная из бэкапа: не дедупится.
+     */
+    @ColumnInfo(name = "dedup_key")
+    val dedupKey: String? = null
 )

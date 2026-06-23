@@ -12,6 +12,10 @@ interface RawNotificationDao {
     @Insert
     suspend fun insert(raw: RawNotificationEntity): Long
 
+    /** Сколько уведомлений с такой сигнатурой уже сохранено — для дедупа повторной доставки. */
+    @Query("SELECT COUNT(*) FROM raw_notifications WHERE dedup_key = :key")
+    suspend fun countByDedupKey(key: String): Int
+
     /** Полный снимок таблицы — для экспорта бэкапа. */
     @Query("SELECT * FROM raw_notifications")
     suspend fun getAll(): List<RawNotificationEntity>

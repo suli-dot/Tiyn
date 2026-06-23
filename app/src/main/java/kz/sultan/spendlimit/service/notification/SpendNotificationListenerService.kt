@@ -48,6 +48,9 @@ class SpendNotificationListenerService : NotificationListenerService() {
 
         val postedAt = sbn.postTime
         val safeText = text ?: title.orEmpty()
+        // Сигнатура повторной доставки: одно уведомление = стабильные key+postTime, даже
+        // при двойном callback / реконнекте листенера / перепосте после ребута.
+        val dedupKey = "${sbn.key}|$postedAt"
 
         scope.launch {
             try {
@@ -61,7 +64,8 @@ class SpendNotificationListenerService : NotificationListenerService() {
                     title = title,
                     text = safeText,
                     postedAt = postedAt,
-                    parsed = parsed
+                    parsed = parsed,
+                    dedupKey = dedupKey
                 )
 
                 if (tx != null && tx.type.isOutgoing) {

@@ -70,14 +70,18 @@ interface FinanceRepository {
      * Сохраняет сырое уведомление и, если оно распозналось как финансовое,
      * создаёт транзакцию.
      *
-     * @return созданная транзакция или null, если уведомление не финансовое.
+     * @param dedupKey сигнатура повторной доставки (`"${sbn.key}|${postTime}"`); если
+     *   уведомление с такой сигнатурой уже сохранено — это дубль (двойной callback/
+     *   реконнект/ребут), ничего не пишем и возвращаем null. null — дедуп выключен.
+     * @return созданная транзакция или null, если уведомление не финансовое или дубль.
      */
     suspend fun ingestNotification(
         packageName: String,
         title: String?,
         text: String,
         postedAt: Long,
-        parsed: ParsedTransaction?
+        parsed: ParsedTransaction?,
+        dedupKey: String? = null
     ): Transaction?
 
     /**

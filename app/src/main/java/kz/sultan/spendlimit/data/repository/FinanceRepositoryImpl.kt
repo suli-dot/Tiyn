@@ -47,17 +47,29 @@ class FinanceRepositoryImpl(
         title: String?,
         text: String,
         postedAt: Long,
-        parsed: ParsedTransaction?
+        parsed: ParsedTransaction?,
+        dedupKey: String?
     ): Transaction? {
-        // Сырое уведомление сохраняем всегда — даже если распарсить не вышло.
-        val rawId = rawDao.insert(
-            RawNotificationEntity(
-                packageName = packageName,
-                title = title,
-                text = text,
-                postedAt = postedAt
-            )
-        )
+        // Дедуп повторной доставки одного пуша. Проверка существования + вставка raw — в
+        // одной Room-транзакции: Room сериализует транзакции, поэтому два конкурентных
+        // вызова (двойной callback) не пройдут проверку оба. Дубль → rawId == null, выходим.
+        // Сырое уведомление сохраняем всегда (даже если не распарсилось), но только если не дубль.
+        val rawId: Long? = db.withTransaction {
+            if (dedupKey != null && rawDao.countByDedupKey(dedupKey) > 0) {
+                null
+            } else {
+                rawDao.insert(
+                    RawNotificationEntity(
+                        packageName = packageName,
+                        title = title,
+                        text = text,
+                        postedAt = postedAt,
+                        dedupKey = dedupKey
+                    )
+                )
+            }
+        }
+        if (rawId == null) return null // дубль — ничего не создаём
 
         if (parsed == null) return null
 
