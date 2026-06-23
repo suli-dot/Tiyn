@@ -31,7 +31,10 @@ object SpendingLimitCalculator {
     )
 
     /**
-     * @param balanceTiyn текущий доступный остаток.
+     * @param balanceTiyn ТЕКУЩИЙ (живой) остаток — траты сегодня из него уже списаны
+     *   (см. автосписание в репозитории). Дневной лимит считается от остатка на НАЧАЛО
+     *   дня, поэтому внутри сегодняшние траты возвращаются обратно (`balance + spentToday`):
+     *   иначе трата уменьшила бы и сам лимит (`daily`), и остаток на сегодня — двойной счёт.
      * @param obligatoryTiyn обязательные платежи до конца периода.
      * @param nextIncomeDate дата следующего поступления.
      * @param spentTodayTiyn сумма исходящих трат за сегодня.
@@ -44,7 +47,10 @@ object SpendingLimitCalculator {
         today: LocalDate = LocalDate.now()
     ): Result {
         val days = Time.daysToCover(nextIncomeDate, today)
-        val disposable = balanceTiyn - obligatoryTiyn
+        // Остаток на начало дня = живой остаток + уже списанные сегодня траты.
+        // Так daily стабилен в течение дня, а трата вычитается ровно один раз (в remaining).
+        val startOfDayBalance = balanceTiyn + spentTodayTiyn
+        val disposable = startOfDayBalance - obligatoryTiyn
         // floorDiv — корректное округление вниз, в т.ч. для отрицательного disposable.
         val daily = Math.floorDiv(disposable, days.toLong())
         val remaining = daily - spentTodayTiyn
