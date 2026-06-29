@@ -97,5 +97,8 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.ktor.client.okhttp)
 
+    // Vosk: офлайн-распознавание речи для wake-word (фоновая голосовая активация)
+    implementation(libs.vosk.android)
+
     testImplementation("junit:junit:4.13.2")
 }

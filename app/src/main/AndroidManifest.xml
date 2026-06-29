@@ -12,6 +12,12 @@
     <!-- Голосовой ввод трат: запись с микрофона для распознавания речи -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Фоновая голосовая активация (wake-word): постоянный микрофон в foreground-сервисе -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Тактильный отклик на срабатывание слова-триггера -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Android 11+: без этого SpeechRecognizer не «видит» сервис распознавания на устройстве -->
     <queries>
         <intent>
@@ -54,5 +60,14 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!--
+          Фоновая голосовая активация (wake-word). type=microphone (требование Android 14).
+          Стартовать только из видимой Activity — mic-FGS нельзя поднять из фона/по загрузке (API 31+).
+        -->
+        <service
+            android:name=".ui.voice.wake.WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 </manifest>

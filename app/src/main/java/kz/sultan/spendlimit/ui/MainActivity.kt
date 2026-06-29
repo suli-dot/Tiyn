@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -182,6 +183,36 @@ private fun MainScreen(
             PackageManager.PERMISSION_GRANTED
         if (granted) speech.start() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
+
+    // Фоновая голосовая активация (wake-word). Тумблер живёт в VoiceActivationCard ниже;
+    // start/stop поднимает/гасит WakeWordService, права (микрофон + уведомления) просим по требованию.
+    var wakeOn by remember { mutableStateOf(false) }
+    val wakePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result[Manifest.permission.RECORD_AUDIO] == true) {
+            kz.sultan.spendlimit.ui.voice.wake.WakeWordService.start(context); wakeOn = true
+        } else {
+            Toast.makeText(context, "Нужен микрофон для голосовой активации", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val onWakeToggle = {
+        if (wakeOn) {
+            kz.sultan.spendlimit.ui.voice.wake.WakeWordService.stop(context); wakeOn = false
+        } else {
+            val micGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            if (micGranted) {
+                kz.sultan.spendlimit.ui.voice.wake.WakeWordService.start(context); wakeOn = true
+            } else {
+                val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                wakePermission.launch(perms.toTypedArray())
+            }
+        }
+    }
     // Результат голосовой команды показываем текстом и озвучиваем (полный дуплекс), затем сбрасываем.
     val speaker = rememberSpeechSpeaker()
     LaunchedEffect(voice.message) {
@@ -226,13 +257,16 @@ private fun MainScreen(
                 title = { Text("Лимит") },
                 actions = {
                     val themeMode by viewModel.themeMode.collectAsState()
-                    TextButton(onClick = { viewModel.cycleTheme() }) {
+                    // Компактная иконка темы (цикл система→светлая→тёмная), чтобы не занимать
+                    // полширины топ-бара длинной подписью и не теснить заголовок/остальные действия.
+                    IconButton(onClick = { viewModel.cycleTheme() }) {
                         Text(
                             when (themeMode) {
-                                ThemeMode.SYSTEM -> "Тема: системная"
-                                ThemeMode.LIGHT -> "Тема: светлая"
-                                ThemeMode.DARK -> "Тема: тёмная"
-                            }
+                                ThemeMode.SYSTEM -> "🌗"
+                                ThemeMode.LIGHT -> "☀️"
+                                ThemeMode.DARK -> "🌙"
+                            },
+                            fontSize = 20.sp
                         )
                     }
                     TextButton(onClick = onOpenStats) { Text("Статистика") }
@@ -254,62 +288,80 @@ private fun MainScreen(
             }
         }
     ) { padding ->
-        Column(
+        // Весь экран — один скроллящийся список: карточки и траты как элементы.
+        // Так ничего не клипается и не упирается в фикс-высоту, даже когда карточек много.
+        LazyColumn(
             modifier = Modifier
                 .padding(padding)
-                .fillMaxSize()
-                .padding(16.dp),
+                .fillMaxSize(),
+            // 16dp по краям; снизу больше — чтобы плавающие кнопки (микрофон + «+») не накрывали контент.
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 132.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (!notifAccess) {
-                OnboardingCard(
-                    title = "Доступ к уведомлениям",
-                    body = "Чтобы автоматически считать траты, дайте доступ к уведомлениям. Читаются только пуши Kaspi.",
-                    button = "Открыть настройки",
-                    onClick = { SystemPermissions.openNotificationAccessSettings(context) }
-                )
-            }
-            if (!batteryOk) {
-                OnboardingCard(
-                    title = "Работа в фоне",
-                    body = "Отключите оптимизацию батареи, иначе система будет «убивать» сервис и часть трат не попадёт в учёт.",
-                    button = "Разрешить",
-                    onClick = { SystemPermissions.requestIgnoreBatteryOptimizations(context) }
-                )
-            }
-            if (viewModel.authConfigured) {
-                AuthStatusCard(
-                    email = authEmail,
-                    onLogin = { showAuth = true },
-                    onLogout = { viewModel.signOut() }
-                )
-            }
-
-            BackupCard(
-                onExport = {
-                    val stamp = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-                    exportLauncher.launch("limit-backup-$stamp.json")
-                },
-                onImport = { importLauncher.launch(arrayOf("application/json", "*/*")) }
-            )
-
-            if (!state.configured) {
-                SettingsForm(onSave = viewModel::saveSettings)
-            } else {
-                LimitHeader(state, onTapBalance = { showBalanceEdit = true })
-                if (exhausted.isNotEmpty()) {
-                    ExhaustedCategoriesCard(exhausted)
-                }
-                Spacer(Modifier.height(4.dp))
-                Text("Траты за сегодня", style = MaterialTheme.typography.titleMedium)
-                if (state.todayTransactions.isNotEmpty()) {
-                    Text(
-                        "Исправить или удалить запись можно на экране «Записи» (кнопка вверху справа)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                item {
+                    OnboardingCard(
+                        title = "Доступ к уведомлениям",
+                        body = "Чтобы автоматически считать траты, дайте доступ к уведомлениям. Читаются только пуши Kaspi.",
+                        button = "Открыть настройки",
+                        onClick = { SystemPermissions.openNotificationAccessSettings(context) }
                     )
                 }
-                TodayList(state.todayTransactions, Modifier.weight(1f))
+            }
+            if (!batteryOk) {
+                item {
+                    OnboardingCard(
+                        title = "Работа в фоне",
+                        body = "Отключите оптимизацию батареи, иначе система будет «убивать» сервис и часть трат не попадёт в учёт.",
+                        button = "Разрешить",
+                        onClick = { SystemPermissions.requestIgnoreBatteryOptimizations(context) }
+                    )
+                }
+            }
+            if (viewModel.authConfigured) {
+                item {
+                    AuthStatusCard(
+                        email = authEmail,
+                        onLogin = { showAuth = true },
+                        onLogout = { viewModel.signOut() }
+                    )
+                }
+            }
+
+            item {
+                BackupCard(
+                    onExport = {
+                        val stamp = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                        exportLauncher.launch("limit-backup-$stamp.json")
+                    },
+                    onImport = { importLauncher.launch(arrayOf("application/json", "*/*")) }
+                )
+            }
+
+            item { VoiceActivationCard(enabled = wakeOn, onToggle = onWakeToggle) }
+
+            if (!state.configured) {
+                item { SettingsForm(onSave = viewModel::saveSettings) }
+            } else {
+                item { LimitHeader(state, onTapBalance = { showBalanceEdit = true }) }
+                if (exhausted.isNotEmpty()) {
+                    item { ExhaustedCategoriesCard(exhausted) }
+                }
+                item { Text("Траты за сегодня", style = MaterialTheme.typography.titleMedium) }
+                if (state.todayTransactions.isNotEmpty()) {
+                    item {
+                        Text(
+                            "Исправить или удалить запись можно на экране «Записи» (кнопка вверху справа)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (state.todayTransactions.isEmpty()) {
+                    item { Text("Пока трат нет", style = MaterialTheme.typography.bodyMedium) }
+                } else {
+                    items(state.todayTransactions, key = { it.id }) { tx -> TodayRow(tx) }
+                }
             }
         }
     }
@@ -426,6 +478,38 @@ private fun BackupCard(onExport: () -> Unit, onImport: () -> Unit) {
     }
 }
 
+/**
+ * Тумблер фоновой голосовой активации. Стиль — как у остальных карточек экрана.
+ * Подпись меняется по состоянию: выключено — подсказка, включено — что именно слушается.
+ */
+@Composable
+private fun VoiceActivationCard(enabled: Boolean, onToggle: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "Голосовая активация",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    if (enabled) "Слушаю слово «лимит» в фоне — скажите его и продиктуйте трату"
+                    else "Скажите «лимит» — и сразу продиктуйте трату, без открытия приложения",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = { onToggle() })
+        }
+    }
+}
+
 @Composable
 private fun RestoreConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
@@ -442,29 +526,22 @@ private fun RestoreConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     )
 }
 
+/** Одна строка траты «за сегодня» на главном экране — элемент общего LazyColumn. */
 @Composable
-private fun TodayList(items: List<Transaction>, modifier: Modifier = Modifier) {
-    if (items.isEmpty()) {
-        Text("Пока трат нет", style = MaterialTheme.typography.bodyMedium)
-        return
-    }
-    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(items, key = { it.id }) { tx ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = (tx.merchant ?: typeLabel(tx.type)) + editedMark(tx),
-                        modifier = Modifier.weight(1f)
-                    )
-                    AmountText(tx)
-                }
-            }
+private fun TodayRow(tx: Transaction) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = (tx.merchant ?: typeLabel(tx.type)) + editedMark(tx),
+                modifier = Modifier.weight(1f)
+            )
+            AmountText(tx)
         }
     }
 }
