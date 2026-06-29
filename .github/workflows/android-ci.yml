@@ -32,6 +32,14 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      # Модель Vosk (~45 MB) не в git: первый прогон качает её в задаче fetchVoskModel,
+      # дальше восстанавливаем из кэша по версии (ключ привязан к версии модели).
+      - name: Кэш модели Vosk
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/vosk-model-small-ru
+          key: vosk-model-small-ru-0.22
+
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 

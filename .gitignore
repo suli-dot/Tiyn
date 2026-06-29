@@ -12,3 +12,7 @@ build/
 *.aab
 *.keystore
 *.jks
+
+# Офлайн-модель Vosk (~45 MB) — не храним в git. Её скачивает Gradle-задача fetchVoskModel
+# в assets при сборке (см. app/build.gradle.kts); в CI берётся из кэша по версии.
+/app/src/main/assets/vosk-model-small-ru/

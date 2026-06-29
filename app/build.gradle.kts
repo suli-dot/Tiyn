@@ -69,6 +69,77 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// --- Офлайн-модель Vosk для wake-word ---
+// Модель тяжёлая (~45 MB) и в git не хранится (.gitignore). Эта задача один раз скачивает
+// её и распаковывает в assets, чтобы сборка была воспроизводима из репозитория и в CI без
+// ручной докладки файлов. VoskModelProvider читает модель из assets/vosk-model-small-ru/.
+val voskModelVersion = "0.22"
+val voskModelName = "vosk-model-small-ru-$voskModelVersion"
+val voskModelUrl = "https://alphacephei.com/vosk/models/$voskModelName.zip"
+val voskAssetsDir = layout.projectDirectory.dir("src/main/assets/vosk-model-small-ru")
+// Маркер версии. Точечное имя — aapt не пакует dotfile'ы в APK, но Gradle читает его для up-to-date.
+val voskMarker = voskAssetsDir.file(".vosk-model-version")
+
+val fetchVoskModel = tasks.register("fetchVoskModel") {
+    description = "Скачивает офлайн-модель Vosk ($voskModelName) и распаковывает её в assets (один раз)."
+    group = "build setup"
+    outputs.dir(voskAssetsDir)
+    // Готово, если маркер уже содержит нужную версию — повторно не качаем и не распаковываем.
+    outputs.upToDateWhen {
+        voskMarker.asFile.run { exists() && readText().trim() == voskModelVersion }
+    }
+    doLast {
+        val assetsDir = voskAssetsDir.asFile
+        val cacheZip = layout.buildDirectory.file("vosk/$voskModelName.zip").get().asFile
+        cacheZip.parentFile.mkdirs()
+
+        if (!cacheZip.exists() || cacheZip.length() == 0L) {
+            logger.lifecycle("Качаю Vosk-модель: $voskModelUrl (~45 MB)…")
+            var current = voskModelUrl
+            var done = false
+            for (hop in 0 until 5) {
+                val conn = (uri(current).toURL().openConnection() as java.net.HttpURLConnection).apply {
+                    instanceFollowRedirects = true
+                    connectTimeout = 30_000
+                    readTimeout = 120_000
+                }
+                val code = conn.responseCode
+                if (code in 300..399) {
+                    current = conn.getHeaderField("Location") ?: error("Редирект без Location при скачивании модели")
+                    conn.disconnect()
+                    continue
+                }
+                if (code != 200) error("Скачивание модели вернуло HTTP $code: $current")
+                conn.inputStream.use { input -> cacheZip.outputStream().use { input.copyTo(it) } }
+                done = true
+                break
+            }
+            if (!done) error("Слишком много редиректов при скачивании модели Vosk")
+        }
+
+        // Перераспаковка с нуля: чистим папку и срезаем верхний каталог архива (vosk-model-small-ru-0.22/).
+        assetsDir.deleteRecursively()
+        assetsDir.mkdirs()
+        copy {
+            from(zipTree(cacheZip)) {
+                eachFile {
+                    relativePath = RelativePath(true, *relativePath.segments.drop(1).toTypedArray())
+                }
+                includeEmptyDirs = false
+            }
+            into(assetsDir)
+        }
+        voskMarker.asFile.writeText(voskModelVersion)
+        logger.lifecycle("Vosk-модель распакована в ${assetsDir.relativeTo(rootDir)}")
+    }
+}
+
+// Цепляем только к слиянию ассетов (merge*Assets), а не к preBuild — чтобы юнит-тесты,
+// которым модель не нужна, не тянули 45 MB зря.
+tasks.matching { it.name.matches(Regex("merge.*Assets")) }.configureEach {
+    dependsOn(fetchVoskModel)
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
