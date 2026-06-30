@@ -1,7 +1,7 @@
 package kz.sultan.spendlimit.domain.voice
 
 import kotlinx.coroutines.flow.first
-import kz.sultan.spendlimit.data.prefs.SettingsRepository
+import kz.sultan.spendlimit.data.prefs.SettingsReader
 import kz.sultan.spendlimit.data.repository.FinanceRepository
 import kz.sultan.spendlimit.domain.SpendingLimitCalculator
 import kz.sultan.spendlimit.domain.category.Categories
@@ -26,7 +26,7 @@ import java.time.ZoneId
  */
 class VoiceCommandHandler(
     private val repo: FinanceRepository,
-    private val settings: SettingsRepository,
+    private val settings: SettingsReader,
     private val categories: CategoryWordResolver = CategoryWordResolver,
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {

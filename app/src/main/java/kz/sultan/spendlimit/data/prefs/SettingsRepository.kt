@@ -21,7 +21,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
  * Пользовательские параметры расчёта лимита.
  * Деньги — в тиынах (Long). Дата — epochDay (Long).
  */
-class SettingsRepository(private val context: Context) {
+class SettingsRepository(private val context: Context) : SettingsReader {
 
     private object Keys {
         val BALANCE = longPreferencesKey("balance_tiyn")
@@ -81,7 +81,7 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { p -> p[Keys.THEME] = mode.name }
     }
 
-    val settings: Flow<UserSettings> = context.dataStore.data.map { p ->
+    override val settings: Flow<UserSettings> = context.dataStore.data.map { p ->
         UserSettings(
             balanceTiyn = p[Keys.BALANCE] ?: 0L,
             obligatoryTiyn = p[Keys.OBLIGATORY] ?: 0L,
