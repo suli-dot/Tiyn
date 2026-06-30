@@ -7,6 +7,7 @@ import kz.sultan.spendlimit.data.prefs.SettingsRepository
 import kz.sultan.spendlimit.data.remote.AuthRepository
 import kz.sultan.spendlimit.data.remote.CloudRestore
 import kz.sultan.spendlimit.data.remote.RemoteSyncSource
+import kz.sultan.spendlimit.data.remote.RoomRestoreWriter
 import kz.sultan.spendlimit.data.remote.SupabaseRemoteSyncSource
 import kz.sultan.spendlimit.data.remote.nlu.AnthropicIntentResolver
 import kz.sultan.spendlimit.data.repository.FinanceRepository
@@ -36,10 +37,12 @@ class AppContainer(context: Context) {
     val remoteSyncSource: RemoteSyncSource = SupabaseRemoteSyncSource()
 
     val cloudRestore: CloudRestore = CloudRestore(
-        db = database,
         remote = remoteSyncSource,
-        rawDao = database.rawNotificationDao(),
-        txDao = database.transactionDao()
+        writer = RoomRestoreWriter(
+            db = database,
+            rawDao = database.rawNotificationDao(),
+            txDao = database.transactionDao()
+        )
     )
 
     val financeRepository: FinanceRepository = FinanceRepositoryImpl(

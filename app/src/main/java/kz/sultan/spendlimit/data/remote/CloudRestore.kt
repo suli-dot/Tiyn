@@ -1,10 +1,5 @@
 package kz.sultan.spendlimit.data.remote
 
-import androidx.room.withTransaction
-import kz.sultan.spendlimit.data.local.AppDatabase
-import kz.sultan.spendlimit.data.local.dao.RawNotificationDao
-import kz.sultan.spendlimit.data.local.dao.TransactionDao
-
 /**
  * Восстановление локальной БД из облачного архива Supabase (канал Б, в дополнение к
  * файловому бэкапу [kz.sultan.spendlimit.data.backup.BackupRepository]).
@@ -13,15 +8,12 @@ import kz.sultan.spendlimit.data.local.dao.TransactionDao
  * совпадающие локальные, отсутствующие в облаке локальные строки не трогаются. Для
  * чистого сценария (переустановка → вход → восстановление) это точное воспроизведение.
  *
- * Порядок вставки важен: raw_notifications ПЕРЕД transactions из-за внешнего ключа
- * transactions.raw_id → raw_notifications.id. Обе вставки в одной Room-транзакции —
- * частичного восстановления при сбое не будет.
+ * Сам аккуратный (атомарный, raw перед tx) способ записи скрыт за [RestoreWriter],
+ * поэтому здесь чистая оркестрация без зависимости от Room.
  */
 class CloudRestore(
-    private val db: AppDatabase,
     private val remote: RemoteSyncSource,
-    private val rawDao: RawNotificationDao,
-    private val txDao: TransactionDao
+    private val writer: RestoreWriter
 ) {
 
     data class Result(val rawNotifications: Int, val transactions: Int)
@@ -33,10 +25,7 @@ class CloudRestore(
         }
         val raws = remote.pullRawNotifications()
         val txs = remote.pullTransactions()
-        db.withTransaction {
-            rawDao.insertAll(raws)
-            txDao.insertAll(txs)
-        }
+        writer.replaceAll(raws, txs)
         return Result(rawNotifications = raws.size, transactions = txs.size)
     }
 }
