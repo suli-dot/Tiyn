@@ -5,6 +5,9 @@ import kz.sultan.spendlimit.data.backup.BackupRepository
 import kz.sultan.spendlimit.data.local.AppDatabase
 import kz.sultan.spendlimit.data.prefs.SettingsRepository
 import kz.sultan.spendlimit.data.remote.AuthRepository
+import kz.sultan.spendlimit.data.remote.CloudRestore
+import kz.sultan.spendlimit.data.remote.RemoteSyncSource
+import kz.sultan.spendlimit.data.remote.SupabaseRemoteSyncSource
 import kz.sultan.spendlimit.data.remote.nlu.AnthropicIntentResolver
 import kz.sultan.spendlimit.data.repository.FinanceRepository
 import kz.sultan.spendlimit.data.repository.FinanceRepositoryImpl
@@ -28,6 +31,16 @@ class AppContainer(context: Context) {
     val authRepository: AuthRepository = AuthRepository()
 
     val backupRepository: BackupRepository = BackupRepository(database, settingsRepository)
+
+    // Облачный архив Supabase: выгрузка/восстановление (RLS режет по своему user_id).
+    val remoteSyncSource: RemoteSyncSource = SupabaseRemoteSyncSource()
+
+    val cloudRestore: CloudRestore = CloudRestore(
+        db = database,
+        remote = remoteSyncSource,
+        rawDao = database.rawNotificationDao(),
+        txDao = database.transactionDao()
+    )
 
     val financeRepository: FinanceRepository = FinanceRepositoryImpl(
         db = database,

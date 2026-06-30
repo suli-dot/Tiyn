@@ -18,6 +18,7 @@ import java.time.Instant
  */
 
 private fun Long.toIso(): String = Instant.ofEpochMilli(this).toString()
+private fun String.fromIso(): Long = Instant.parse(this).toEpochMilli()
 
 @Serializable
 data class RawNotificationDto(
@@ -36,6 +37,21 @@ fun RawNotificationEntity.toDto(userId: String) = RawNotificationDto(
     title = title,
     text = text,
     postedAt = postedAt.toIso()
+)
+
+/**
+ * Облако → локальная сущность (восстановление). client_id облака — это локальный id
+ * (REPLACE по нему). synced = true: запись пришла из облака, повторно выгружать нечего.
+ * dedup_key не восстанавливаем (null) — восстановленная запись не из живого пуша.
+ */
+fun RawNotificationDto.toEntity() = RawNotificationEntity(
+    id = clientId,
+    packageName = packageName,
+    title = title,
+    text = text,
+    postedAt = postedAt.fromIso(),
+    synced = true,
+    dedupKey = null
 )
 
 @Serializable
@@ -66,4 +82,23 @@ fun TransactionEntity.toDto(userId: String) = TransactionDto(
     createdAt = createdAt.toIso(),
     editedAt = editedAt?.toIso(),
     deletedAt = deletedAt?.toIso()
+)
+
+/**
+ * Облако → локальная сущность (восстановление). Сохраняем edited_at/deleted_at как есть
+ * (soft-deleted строки восстанавливаются удалёнными — в выборки не попадут, повторный синк
+ * их не воскресит). synced = true: запись из облака, выгружать повторно нечего.
+ */
+fun TransactionDto.toEntity() = TransactionEntity(
+    id = clientId,
+    rawId = rawId,
+    amount = amount,
+    type = type,
+    merchant = merchant,
+    category = category,
+    currency = currency,
+    createdAt = createdAt.fromIso(),
+    editedAt = editedAt?.fromIso(),
+    deletedAt = deletedAt?.fromIso(),
+    synced = true
 )

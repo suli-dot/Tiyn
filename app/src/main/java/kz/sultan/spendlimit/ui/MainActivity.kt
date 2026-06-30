@@ -161,6 +161,7 @@ private fun MainScreen(
     var showAuth by remember { mutableStateOf(false) }
     var showBalanceEdit by remember { mutableStateOf(false) }
     var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var showCloudRestore by remember { mutableStateOf(false) }
     val authEmail by viewModel.authEmail.collectAsState()
     val exhausted by viewModel.exhaustedCategories.collectAsState()
 
@@ -323,7 +324,8 @@ private fun MainScreen(
                     AuthStatusCard(
                         email = authEmail,
                         onLogin = { showAuth = true },
-                        onLogout = { viewModel.signOut() }
+                        onLogout = { viewModel.signOut() },
+                        onRestore = { showCloudRestore = true }
                     )
                 }
             }
@@ -408,6 +410,30 @@ private fun MainScreen(
                 }
             },
             onDismiss = { pendingImportUri = null }
+        )
+    }
+
+    if (showCloudRestore) {
+        AlertDialog(
+            onDismissRequest = { showCloudRestore = false },
+            title = { Text("Восстановить из облака?") },
+            text = {
+                Text(
+                    "Записи из облака перезапишут локальные с тем же id. " +
+                        "Несохранённые локальные правки по этим записям будут потеряны."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCloudRestore = false
+                    viewModel.restoreFromCloud { msg ->
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
+                }) { Text("Восстановить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloudRestore = false }) { Text("Отмена") }
+            }
         )
     }
 }
@@ -1559,7 +1585,12 @@ private fun OnboardingCard(title: String, body: String, button: String, onClick:
 }
 
 @Composable
-private fun AuthStatusCard(email: String?, onLogin: () -> Unit, onLogout: () -> Unit) {
+private fun AuthStatusCard(
+    email: String?,
+    onLogin: () -> Unit,
+    onLogout: () -> Unit,
+    onRestore: () -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (email == null) {
@@ -1572,7 +1603,10 @@ private fun AuthStatusCard(email: String?, onLogin: () -> Unit, onLogout: () -> 
             } else {
                 Text("Бэкап включён", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(email, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = onLogout) { Text("Выйти") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onRestore) { Text("Восстановить из облака") }
+                    TextButton(onClick = onLogout) { Text("Выйти") }
+                }
             }
         }
     }

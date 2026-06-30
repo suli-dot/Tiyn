@@ -78,6 +78,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val settingsRepo = container.settingsRepository
     private val auth = container.authRepository
     private val backup = container.backupRepository
+    private val cloudRestore = container.cloudRestore
     private val intentResolver = container.intentResolver
     private val voiceHandler = container.voiceCommandHandler
 
@@ -343,6 +344,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 null
             } catch (e: Exception) {
                 e.message ?: "Не удалось восстановить из файла (повреждён или не тот формат)"
+            }
+            onResult(msg)
+        }
+    }
+
+    /**
+     * Восстанавливает записи из облака (Supabase) в локальную БД. Требует входа в аккаунт.
+     * [onResult] получает готовое сообщение для показа (успех со сводкой либо текст ошибки).
+     */
+    fun restoreFromCloud(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val msg = try {
+                val r = cloudRestore.restore()
+                "Восстановлено из облака: ${r.transactions} операций, ${r.rawNotifications} уведомлений"
+            } catch (e: Exception) {
+                e.message ?: "Не удалось восстановить из облака"
             }
             onResult(msg)
         }

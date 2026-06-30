@@ -4,7 +4,10 @@ import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.postgrest.from
 import kz.sultan.spendlimit.data.local.entity.RawNotificationEntity
 import kz.sultan.spendlimit.data.local.entity.TransactionEntity
+import kz.sultan.spendlimit.data.remote.dto.RawNotificationDto
+import kz.sultan.spendlimit.data.remote.dto.TransactionDto
 import kz.sultan.spendlimit.data.remote.dto.toDto
+import kz.sultan.spendlimit.data.remote.dto.toEntity
 
 /**
  * Supabase-реализация выгрузки через Postgrest.
@@ -38,5 +41,18 @@ class SupabaseRemoteSyncSource : RemoteSyncSource {
         // Мёрж по составному первичному ключу (user_id, client_id) — задан в схеме Supabase.
         client.from("transactions").upsert(dtos)
         return items.map { it.id }
+    }
+
+    override suspend fun pullRawNotifications(): List<RawNotificationEntity> {
+        if (!isAuthenticated()) return emptyList()
+        // RLS-политики ограничивают выборку строками текущего пользователя — фильтр не нужен.
+        return client.from("raw_notifications").select().decodeList<RawNotificationDto>()
+            .map { it.toEntity() }
+    }
+
+    override suspend fun pullTransactions(): List<TransactionEntity> {
+        if (!isAuthenticated()) return emptyList()
+        return client.from("transactions").select().decodeList<TransactionDto>()
+            .map { it.toEntity() }
     }
 }

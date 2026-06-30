@@ -18,4 +18,14 @@ interface RemoteSyncSource {
 
     /** @return id успешно выгруженных транзакций. */
     suspend fun pushTransactions(items: List<TransactionEntity>): List<Long>
+
+    /**
+     * Полная выгрузка облачного архива в локальные сущности — для восстановления
+     * на новом устройстве. RLS отдаёт только строки текущего пользователя.
+     * @return сырые уведомления (вставлять ПЕРЕД транзакциями из-за FK raw_id).
+     */
+    suspend fun pullRawNotifications(): List<RawNotificationEntity>
+
+    /** Полная выгрузка транзакций пользователя из облака (включая soft-deleted). */
+    suspend fun pullTransactions(): List<TransactionEntity>
 }
