@@ -86,6 +86,7 @@ import kz.sultan.spendlimit.domain.category.Categories
 import kz.sultan.spendlimit.domain.model.Transaction
 import kz.sultan.spendlimit.domain.model.TransactionType
 import kz.sultan.spendlimit.ui.theme.SpendLimitTheme
+import kz.sultan.spendlimit.domain.ForecastEngine
 import kz.sultan.spendlimit.ui.theme.positiveColor
 import kz.sultan.spendlimit.ui.voice.MicState
 import kz.sultan.spendlimit.ui.voice.rememberSpeechController
@@ -162,6 +163,7 @@ private fun MainScreen(
     var showBalanceEdit by remember { mutableStateOf(false) }
     var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var showCloudRestore by remember { mutableStateOf(false) }
+    var showWhatIf by remember { mutableStateOf(false) }
     val authEmail by viewModel.authEmail.collectAsState()
     val exhausted by viewModel.exhaustedCategories.collectAsState()
 
@@ -346,6 +348,9 @@ private fun MainScreen(
                 item { SettingsForm(onSave = viewModel::saveSettings) }
             } else {
                 item { LimitHeader(state, onTapBalance = { showBalanceEdit = true }) }
+                state.forecast?.let { fc ->
+                    item { ForecastCard(fc, incomeDate = state.nextIncomeDate, onWhatIf = { showWhatIf = true }) }
+                }
                 if (exhausted.isNotEmpty()) {
                     item { ExhaustedCategoriesCard(exhausted) }
                 }
@@ -410,6 +415,13 @@ private fun MainScreen(
                 }
             },
             onDismiss = { pendingImportUri = null }
+        )
+    }
+
+    if (showWhatIf) {
+        WhatIfDialog(
+            onDismiss = { showWhatIf = false },
+            onCompute = { viewModel.computeWhatIf(it) }
         )
     }
 
@@ -1478,6 +1490,117 @@ private fun LimitHeader(state: MainUiState, onTapBalance: () -> Unit) {
             )
         }
     }
+}
+
+private val forecastDateFmt = DateTimeFormatter.ofPattern("dd.MM")
+
+/**
+ * Прогноз «доживу ли до поступления» по фактическому темпу трат. Цвет фона — по риску
+ * (HIGH errorContainer / MEDIUM tertiary / LOW surfaceVariant). Кнопка открывает «что-если».
+ */
+@Composable
+private fun ForecastCard(
+    forecast: ForecastEngine.Forecast,
+    incomeDate: LocalDate?,
+    onWhatIf: () -> Unit
+) {
+    val container = when (forecast.risk) {
+        ForecastEngine.Risk.HIGH -> MaterialTheme.colorScheme.errorContainer
+        ForecastEngine.Risk.MEDIUM -> MaterialTheme.colorScheme.tertiaryContainer
+        ForecastEngine.Risk.LOW -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val onContainer = when (forecast.risk) {
+        ForecastEngine.Risk.HIGH -> MaterialTheme.colorScheme.onErrorContainer
+        ForecastEngine.Risk.MEDIUM -> MaterialTheme.colorScheme.onTertiaryContainer
+        ForecastEngine.Risk.LOW -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "Прогноз до поступления",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = onContainer
+            )
+            val headline = if (forecast.willSurvive) {
+                "При текущем темпе денег хватит до поступления"
+            } else {
+                val run = forecast.runOutDate?.format(forecastDateFmt) ?: "—"
+                val inc = incomeDate?.format(forecastDateFmt) ?: "—"
+                "Хватит до $run, поступление $inc"
+            }
+            Text(headline, style = MaterialTheme.typography.bodyMedium, color = onContainer)
+
+            val detail = buildString {
+                append("Темп ${Money.formatTiyn(forecast.avgDailySpendTiyn)}/день")
+                append(" · безопасно ${Money.formatTiyn(forecast.safeDailyTiyn)}/день")
+                if (!forecast.willSurvive && forecast.shortfallPerDayTiyn > 0L) {
+                    append(" · режь ${Money.formatTiyn(forecast.shortfallPerDayTiyn)}/день")
+                }
+            }
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = onContainer)
+
+            TextButton(onClick = onWhatIf) { Text("Что если потратить…") }
+        }
+    }
+}
+
+/** Сценарий «что будет, если потратить N»: ввод суммы → сравнение лимита до/после + риск. */
+@Composable
+private fun WhatIfDialog(
+    onDismiss: () -> Unit,
+    onCompute: (Long) -> ForecastEngine.WhatIf?
+) {
+    var input by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf<ForecastEngine.WhatIf?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Что если потратить") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it; error = null },
+                    label = { Text("Сумма, ₸") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                result?.let { w ->
+                    val riskText = when (w.after.risk) {
+                        ForecastEngine.Risk.HIGH -> "риск высокий"
+                        ForecastEngine.Risk.MEDIUM -> "риск средний"
+                        ForecastEngine.Risk.LOW -> "риск низкий"
+                    }
+                    Text(
+                        (if (w.affordable) "Можно. " else "Лучше воздержаться. ") +
+                            "Дневной лимит ${Money.formatTiyn(w.before.safeDailyTiyn)} → " +
+                            "${Money.formatTiyn(w.after.safeDailyTiyn)}, $riskText.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val tiyn = tengeToTiyn(input)
+                if (tiyn == null || tiyn <= 0L) {
+                    error = "Введите сумму"
+                } else {
+                    val w = onCompute(tiyn)
+                    if (w == null) error = "Сначала укажите дату поступления" else result = w
+                }
+            }) { Text("Посчитать") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } }
+    )
 }
 
 @Composable

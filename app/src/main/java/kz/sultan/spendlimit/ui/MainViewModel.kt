@@ -24,6 +24,7 @@ import kz.sultan.spendlimit.data.repository.CategoryLimits
 import kz.sultan.spendlimit.data.repository.CategoryPeriodStatus
 import kz.sultan.spendlimit.data.repository.DayTotal
 import kz.sultan.spendlimit.domain.BudgetPeriod
+import kz.sultan.spendlimit.domain.ForecastEngine
 import kz.sultan.spendlimit.domain.SpendingLimitCalculator
 import kz.sultan.spendlimit.domain.category.Categories
 import kz.sultan.spendlimit.domain.model.Transaction
@@ -39,7 +40,14 @@ import java.time.ZoneId
 data class MainUiState(
     val configured: Boolean = false,
     val balanceTiyn: Long = 0L,
+    val obligatoryTiyn: Long = 0L,
+    val nextIncomeDate: LocalDate? = null,
+    val spentTodayTiyn: Long = 0L,
+    /** Фактический темп трат (тиыны/день) за последние 14 дней — вход прогноза. */
+    val avgDailySpendTiyn: Long = 0L,
     val limit: SpendingLimitCalculator.Result? = null,
+    /** Прогноз «доживу ли до поступления»; null — пока не настроено. */
+    val forecast: ForecastEngine.Forecast? = null,
     val todayTransactions: List<Transaction> = emptyList()
 )
 
@@ -82,20 +90,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val intentResolver = container.intentResolver
     private val voiceHandler = container.voiceCommandHandler
 
+    /**
+     * Темп трат за последние 14 полных дней (без сегодняшнего, чтобы не шуметь интрадей-частью):
+     * сумма исходящих / 14. Окно фиксируется при создании потока — для короткоживущей VM этого
+     * достаточно. Кормит [ForecastEngine].
+     */
+    private val avgDailySpendTiyn: kotlinx.coroutines.flow.Flow<Long> = finance
+        .observeOutgoingByDay(
+            Time.startOfTodayMillis() - 14L * 86_400_000L,
+            Time.startOfTodayMillis()
+        )
+        .map { days -> days.sumOf { it.totalTiyn } / 14 }
+
     val uiState: StateFlow<MainUiState> = combine(
         settingsRepo.settings,
         finance.observeTodayOutgoingSum(),
-        finance.observeTodayTransactions()
-    ) { settings, spentToday, txs ->
+        finance.observeTodayTransactions(),
+        avgDailySpendTiyn
+    ) { settings, spentToday, txs, avgSpend ->
+        val date = settings.nextIncomeDate
         MainUiState(
             configured = settings.isConfigured,
             balanceTiyn = settings.balanceTiyn,
-            limit = settings.nextIncomeDate?.let { date ->
+            obligatoryTiyn = settings.obligatoryTiyn,
+            nextIncomeDate = date,
+            spentTodayTiyn = spentToday,
+            avgDailySpendTiyn = avgSpend,
+            limit = date?.let {
                 SpendingLimitCalculator.compute(
                     balanceTiyn = settings.balanceTiyn,
                     obligatoryTiyn = settings.obligatoryTiyn,
-                    nextIncomeDate = date,
+                    nextIncomeDate = it,
                     spentTodayTiyn = spentToday
+                )
+            },
+            forecast = date?.let {
+                ForecastEngine.project(
+                    balanceTiyn = settings.balanceTiyn,
+                    obligatoryTiyn = settings.obligatoryTiyn,
+                    nextIncomeDate = it,
+                    spentTodayTiyn = spentToday,
+                    avgDailySpendTiyn = avgSpend
                 )
             },
             todayTransactions = txs
@@ -363,6 +398,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             onResult(msg)
         }
+    }
+
+    /**
+     * Сценарий «что будет, если потратить [spendTiyn] прямо сейчас» — из текущего снимка [uiState].
+     * Возвращает null, если не настроена дата поступления (прогноз неприменим).
+     */
+    fun computeWhatIf(spendTiyn: Long): ForecastEngine.WhatIf? {
+        val s = uiState.value
+        val date = s.nextIncomeDate ?: return null
+        return ForecastEngine.whatIf(
+            balanceTiyn = s.balanceTiyn,
+            obligatoryTiyn = s.obligatoryTiyn,
+            nextIncomeDate = date,
+            spentTodayTiyn = s.spentTodayTiyn,
+            avgDailySpendTiyn = s.avgDailySpendTiyn,
+            spendTiyn = spendTiyn
+        )
     }
 
     /** Добавляет операцию вручную; лимит и сводки пересчитаются через существующие Flow. */
