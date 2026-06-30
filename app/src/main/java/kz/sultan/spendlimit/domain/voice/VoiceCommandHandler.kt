@@ -3,6 +3,7 @@ package kz.sultan.spendlimit.domain.voice
 import kotlinx.coroutines.flow.first
 import kz.sultan.spendlimit.data.prefs.SettingsReader
 import kz.sultan.spendlimit.data.repository.FinanceRepository
+import kz.sultan.spendlimit.domain.ForecastEngine
 import kz.sultan.spendlimit.domain.SpendingLimitCalculator
 import kz.sultan.spendlimit.domain.category.Categories
 import kz.sultan.spendlimit.domain.model.Transaction
@@ -37,6 +38,7 @@ class VoiceCommandHandler(
         is Intent.SetLimit -> setLimit(intent)
         is Intent.QuerySpent -> querySpent(intent)
         is Intent.QueryBalance -> queryBalance(intent)
+        is Intent.CanISpend -> canISpend(intent)
         is Intent.CorrectLast -> correctLast(intent)
         is Intent.Clarify -> VoiceOutcome.NeedClarify(intent.question)
     }
@@ -98,6 +100,36 @@ class VoiceCommandHandler(
             VoiceOutcome.Answer("Дневной лимит превышен на ${Money.formatTiyn(-r.remainingTodayTiyn)}")
         else
             VoiceOutcome.Answer("На сегодня осталось ${Money.formatTiyn(r.remainingTodayTiyn)} из ${Money.formatTiyn(r.dailyLimitTiyn)}")
+    }
+
+    private suspend fun canISpend(i: Intent.CanISpend): VoiceOutcome {
+        validateAmount(i.amountTiyn)?.let { return it }
+        val s = settings.settings.first()
+        val income = s.nextIncomeDate
+            ?: return VoiceOutcome.NeedClarify("Сначала укажи дату следующего поступления — без неё прогноз не посчитать.")
+        val now = clock()
+        val spentToday = repo.spentBetween(Time.startOfTodayMillis(now), Time.startOfTomorrowMillis(now), null)
+        // Темп трат за последние 14 полных дней (как в прогнозе на главном).
+        val avg = repo.spentBetween(Time.startOfTodayMillis(now) - 14L * 86_400_000L, Time.startOfTodayMillis(now), null) / 14
+        val w = ForecastEngine.whatIf(
+            balanceTiyn = s.balanceTiyn,
+            obligatoryTiyn = s.obligatoryTiyn,
+            nextIncomeDate = income,
+            spentTodayTiyn = spentToday,
+            avgDailySpendTiyn = avg,
+            spendTiyn = i.amountTiyn,
+            today = today(now)
+        )
+        val verdict = if (w.affordable) "Можно" else "Лучше воздержаться"
+        val risk = when (w.after.risk) {
+            ForecastEngine.Risk.HIGH -> "риск высокий"
+            ForecastEngine.Risk.MEDIUM -> "риск средний"
+            ForecastEngine.Risk.LOW -> "риск низкий"
+        }
+        return VoiceOutcome.Answer(
+            "$verdict. Дневной лимит ${Money.formatTiyn(w.before.safeDailyTiyn)} → " +
+                "${Money.formatTiyn(w.after.safeDailyTiyn)}, $risk."
+        )
     }
 
     private suspend fun correctLast(i: Intent.CorrectLast): VoiceOutcome {

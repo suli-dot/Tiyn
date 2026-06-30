@@ -73,6 +73,11 @@ object IntentParser {
             else Intent.QuerySpent(period, input.str("category"))
         }
         "query_balance" -> Intent.QueryBalance(input.budgetPeriod("period"))
+        "can_i_spend" -> {
+            val tiyn = input.tiyn("amount")
+            if (tiyn == null) clarify("сумма", "Сколько хочешь потратить?")
+            else Intent.CanISpend(tiyn)
+        }
         "correct_last" -> Intent.CorrectLast(
             newAmountTiyn = input.tiyn("new_amount"),
             newCategoryWord = input.str("new_category"),

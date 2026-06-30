@@ -47,6 +47,11 @@ sealed interface Intent {
         val period: BudgetPeriod?
     ) : Intent
 
+    /** «можно ли потратить N» → прогноз последствий траты, без записи. */
+    data class CanISpend(
+        val amountTiyn: Long
+    ) : Intent
+
     /** «нет, это была не такси а кафе» / «отмени последнее» → правка последней операции. */
     data class CorrectLast(
         val newAmountTiyn: Long?,

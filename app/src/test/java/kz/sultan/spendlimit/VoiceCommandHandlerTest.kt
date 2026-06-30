@@ -17,6 +17,7 @@ import kz.sultan.spendlimit.domain.model.TransactionType
 import kz.sultan.spendlimit.domain.voice.Intent
 import kz.sultan.spendlimit.domain.voice.VoiceCommandHandler
 import kz.sultan.spendlimit.domain.voice.VoiceOutcome
+import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -185,6 +186,32 @@ class VoiceCommandHandlerTest {
         val out = h.handle(Intent.CorrectLast(newAmountTiyn = 0L, newCategoryWord = null, delete = false))
         assertTrue("нулевая правка отклоняется", out is VoiceOutcome.NeedClarify)
         assertTrue("при отказе запись не меняется", repo.updates.isEmpty())
+    }
+
+    // ---- «Можно ли потратить N» (прогноз, без записи) ----
+
+    @Test
+    fun canISpend_noIncomeDate_clarifies() = runBlocking {
+        val (h, _) = handler() // nextIncomeDate = null
+        val out = h.handle(Intent.CanISpend(1_000_000L))
+        assertTrue("без даты поступления прогноз не посчитать", out is VoiceOutcome.NeedClarify)
+    }
+
+    @Test
+    fun canISpend_withIncomeDate_answers() = runBlocking {
+        val settings = UserSettings(
+            balanceTiyn = 10_000_000L, obligatoryTiyn = 0L, nextIncomeDate = LocalDate.now().plusDays(10)
+        )
+        val (h, _) = handler(settings = settings)
+        val out = h.handle(Intent.CanISpend(2_000_000L))
+        assertTrue("прогноз даёт ответ-вердикт", out is VoiceOutcome.Answer)
+    }
+
+    @Test
+    fun canISpend_zeroAmount_clarifies() = runBlocking {
+        val settings = UserSettings(10_000_000L, 0L, LocalDate.now().plusDays(10))
+        val (h, _) = handler(settings = settings)
+        assertTrue(h.handle(Intent.CanISpend(0L)) is VoiceOutcome.NeedClarify)
     }
 
     // ---- Clarify проходит насквозь ----

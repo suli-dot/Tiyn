@@ -12,7 +12,7 @@ import java.time.LocalDate
  */
 object AnthropicPrompt {
 
-    /** Семь «форм» намерений. Модель (tool_choice=any) обязана выбрать ровно одну и заполнить слоты. */
+    /** Восемь «форм» намерений. Модель (tool_choice=any) обязана выбрать ровно одну и заполнить слоты. */
     private val TOOLS_JSON = """
 [
   {
@@ -78,6 +78,17 @@ object AnthropicPrompt {
     }
   },
   {
+    "name": "can_i_spend",
+    "description": "Пользователь спрашивает, может ли он позволить себе трату ('можно ли потратить N', 'потяну ли покупку на N', 'не уйду ли в минус, если потрачу N'). Это ВОПРОС-прогноз, НЕ факт траты — отличай от add_expense (там трата уже совершена).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number", "description": "Предполагаемая сумма траты в тенге (KZT)." }
+      },
+      "required": ["amount"]
+    }
+  },
+  {
     "name": "correct_last",
     "description": "Пользователь правит или отменяет ПОСЛЕДНЮЮ операцию ('нет, это была еда', 'отмени', 'сумма не та, 3000').",
     "input_schema": {
@@ -128,7 +139,8 @@ object AnthropicPrompt {
 "зарплата пришла, 400 тысяч"   → add_income(amount=400000, note="зарплата")
 "лимит на еду 60 тысяч в месяц" → set_limit(amount=60000, period="month", category="еда")
 "нет, это была не такси а кафе" → correct_last(new_category="кафе")
-"отмени последнее"             → correct_last(delete=true)"""
+"отмени последнее"             → correct_last(delete=true)
+"можно ли потратить 15 тысяч"  → can_i_spend(amount=15000)"""
 
     private val json = Json { ignoreUnknownKeys = true }
 

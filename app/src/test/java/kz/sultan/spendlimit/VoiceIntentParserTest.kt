@@ -73,6 +73,18 @@ class VoiceIntentParserTest {
     }
 
     @Test
+    fun canISpend_parsed() {
+        val i = resolved(toolUse("can_i_spend", """{"amount":15000}""")) as Intent.CanISpend
+        assertEquals(1_500_000L, i.amountTiyn) // 15 000 ₸
+    }
+
+    @Test
+    fun canISpend_missingAmount_becomesClarify() {
+        val i = resolved(toolUse("can_i_spend", """{}"""))
+        assertTrue(i is Intent.Clarify)
+    }
+
+    @Test
     fun correctLast_delete() {
         val i = resolved(toolUse("correct_last", """{"delete":true}""")) as Intent.CorrectLast
         assertTrue(i.delete)
